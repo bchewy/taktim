@@ -14,8 +14,8 @@ exa_py>=1.15.3
 # LangChain RAG dependencies
 langchain>=0.3.0
 langchain-openai>=0.3.0
-langchain-pinecone>=0.4.0
+langchain-pinecone>=0.2.11
 langchain-text-splitters>=0.3.0
-pinecone>=5.0.0
+pinecone>=7.3.0
 beautifulsoup4>=4.12.0
 requests>=2.31.0

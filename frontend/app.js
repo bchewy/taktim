@@ -143,28 +143,26 @@ class GeoGovApp {
 
     // Feature Analysis
     async analyzeFeature() {
-        const form = document.querySelector('.analysis-form');
-        const formData = new FormData(form);
         const button = document.getElementById('analyze-btn');
+        
+        // Collect form data directly from elements
+        const featureData = {
+            feature_id: document.getElementById('feature_id').value.trim(),
+            title: document.getElementById('title').value.trim(),
+            description: document.getElementById('description').value.trim(),
+            docs: this.parseCommaSeparated(document.getElementById('docs').value),
+            tags: this.parseCommaSeparated(document.getElementById('tags').value),
+            code_hints: this.parseCommaSeparated(document.getElementById('code_hints').value)
+        };
         
         // Validate required fields
         const requiredFields = ['feature_id', 'title', 'description'];
-        const missing = requiredFields.filter(field => !formData.get(field));
+        const missing = requiredFields.filter(field => !featureData[field]);
         
         if (missing.length > 0) {
             this.showNotification(`Please fill in required fields: ${missing.join(', ')}`, 'error');
             return;
         }
-
-        // Prepare request data
-        const featureData = {
-            feature_id: formData.get('feature_id'),
-            title: formData.get('title'),
-            description: formData.get('description'),
-            docs: this.parseCommaSeparated(formData.get('docs')),
-            tags: this.parseCommaSeparated(formData.get('tags')),
-            code_hints: this.parseCommaSeparated(formData.get('code_hints'))
-        };
 
         try {
             button.disabled = true;
