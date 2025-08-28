@@ -1,0 +1,8 @@
+{
+  "feature_id": "F-2381",
+  "title": "Personalized Home Feed v3",
+  "description": "Reranks videos using watch history; EU rollout planned.",
+  "docs": ["https://internal/prd", "https://internal/trd"],
+  "code_hints": ["uses ageGate()", "if region in ['EU','EEA']:"],
+  "tags": ["recommender", "personalization", "minors_possible"]
+}
