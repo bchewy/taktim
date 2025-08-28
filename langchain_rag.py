@@ -7,6 +7,7 @@ Modern LangChain implementation following official tutorials
 import os
 import asyncio
 import hashlib
+import json
 from typing import List, Dict, Any, Optional
 from dataclasses import dataclass
 
@@ -477,6 +478,225 @@ Answer:"""
                 "answer": f"Error processing question: {str(e)}",
                 "source_documents": [],
                 "sources": []
+            }
+    
+    async def compliance_finder(self, artifact_title: str, artifact_description: str, artifact_docs: List[str], 
+                               artifact_code_hints: List[str], artifact_tags: List[str]) -> Dict[str, Any]:
+        """Find compliance signals and regulations using LangChain RAG"""
+        
+        prompt = f"""Analyze this software feature for geographical compliance requirements:
+
+**Feature:** {artifact_title}
+**Description:** {artifact_description}
+**Documentation:** {' '.join(artifact_docs)}
+**Code Hints:** {' '.join(artifact_code_hints)}
+**Tags:** {', '.join(artifact_tags)}
+
+Based on the legal documents in your knowledge base, identify:
+1. Compliance signals (keywords/concepts that suggest regulatory requirements)
+2. Specific regulations that may apply to this feature
+3. Why each regulation applies
+4. Citations to support your analysis
+
+Return your analysis as JSON with this structure:
+{{
+"signals": ["list of compliance signals found"],
+"claims": [
+    {{
+    "regulation": "regulation name", 
+    "why": "explanation why this regulation applies",
+    "citations": ["document reference"]
+    }}
+],
+"citations": ["list of all document references used"]
+}}"""
+
+        try:
+            if not self.rag_chain:
+                # Try to initialize from existing index
+                try:
+                    self._initialize_existing_retriever()
+                except Exception as e:
+                    return {
+                        "signals": [],
+                        "claims": [],
+                        "citations": [],
+                        "error": f"RAG system not available: {str(e)}"
+                    }
+            
+            result = self.rag_chain.invoke(prompt)
+            
+            # Try to parse JSON from the result
+            try:
+                parsed_result = json.loads(result)
+                return parsed_result
+            except json.JSONDecodeError:
+                # If not valid JSON, extract what we can
+                return {
+                    "signals": [],
+                    "claims": [],
+                    "citations": [],
+                    "raw_response": result,
+                    "error": "Could not parse JSON response"
+                }
+                
+        except Exception as e:
+            return {
+                "signals": [],
+                "claims": [],
+                "citations": [],
+                "error": f"LangChain RAG query failed: {str(e)}"
+            }
+    
+    async def compliance_counter(self, artifact_title: str, artifact_description: str, artifact_docs: List[str], 
+                                artifact_code_hints: List[str], artifact_tags: List[str]) -> Dict[str, Any]:
+        """Find counter-arguments and missing signals using LangChain RAG"""
+        
+        prompt = f"""Analyze this software feature for potential exemptions or counter-arguments to geographical compliance:
+
+**Feature:** {artifact_title}
+**Description:** {artifact_description}
+**Documentation:** {' '.join(artifact_docs)}
+**Code Hints:** {' '.join(artifact_code_hints)}
+**Tags:** {', '.join(artifact_tags)}
+
+Based on the legal documents in your knowledge base, find counter-arguments and missing signals that might suggest this feature does NOT require geographical compliance:
+1. Counter-points (arguments against compliance requirements)
+2. Missing signals (compliance indicators that are notably absent)
+3. Citations supporting your counter-analysis
+
+Return as JSON:
+{{
+"counter_points": ["list of arguments against compliance requirements"],
+"missing_signals": ["list of compliance signals that are notably missing"],
+"citations": ["list of document references"]
+}}"""
+
+        try:
+            if not self.rag_chain:
+                try:
+                    self._initialize_existing_retriever()
+                except Exception as e:
+                    return {
+                        "counter_points": [],
+                        "missing_signals": [],
+                        "citations": [],
+                        "error": f"RAG system not available: {str(e)}"
+                    }
+            
+            result = self.rag_chain.invoke(prompt)
+            
+            try:
+                parsed_result = json.loads(result)
+                return parsed_result
+            except json.JSONDecodeError:
+                return {
+                    "counter_points": [],
+                    "missing_signals": [],
+                    "citations": [],
+                    "raw_response": result,
+                    "error": "Could not parse JSON response"
+                }
+                
+        except Exception as e:
+            return {
+                "counter_points": [],
+                "missing_signals": [],
+                "citations": [],
+                "error": f"LangChain RAG query failed: {str(e)}"
+            }
+    
+    async def compliance_judge(self, artifact_title: str, artifact_description: str, 
+                              finder_signals: List[str], finder_claims: List[Dict], 
+                              counter_points: List[str], missing_signals: List[str], 
+                              make_decision: bool = False) -> Dict[str, Any]:
+        """Make final compliance decision using LangChain RAG"""
+        
+        if make_decision:
+            instructions = """**Instructions:**
+1. Synthesize all evidence for and against
+2. Make a final determination on compliance requirements  
+3. Assign a confidence score (0.0-1.0)
+4. Combine all relevant signals found
+5. Provide clear reasoning
+
+Return as JSON:
+{
+"signals": ["combined list of all relevant signals"],
+"notes": "detailed reasoning for your decision", 
+"confidence": 0.85,
+"requires_compliance": true
+}"""
+        else:
+            instructions = """**Instructions:**
+1. Synthesize all evidence for and against
+2. Combine all relevant signals found
+3. Assign a confidence score (0.0-1.0) for the analysis quality
+4. Provide clear reasoning notes
+5. DO NOT make the final compliance decision
+
+Return as JSON:
+{
+"signals": ["combined list of all relevant signals"],
+"notes": "detailed reasoning and analysis",
+"confidence": 0.85
+}"""
+        
+        prompt = f"""Analyze this software feature for geographical regulatory compliance:
+
+**Feature:** {artifact_title}
+**Description:** {artifact_description}
+
+**Evidence FOR compliance (from finder analysis):**
+- Signals found: {', '.join(finder_signals)}
+- Regulatory claims: {json.dumps(finder_claims, indent=2)}
+
+**Evidence AGAINST compliance (from counter analysis):**
+- Counter-points: {', '.join(counter_points)}
+- Missing signals: {', '.join(missing_signals)}
+
+{instructions}"""
+
+        try:
+            if not self.rag_chain:
+                try:
+                    self._initialize_existing_retriever()
+                except Exception as e:
+                    return {
+                        "signals": list(set(finder_signals + missing_signals)),
+                        "notes": f"RAG system not available: {str(e)}",
+                        "confidence": 0.0,
+                        "error": str(e)
+                    }
+            
+            result = self.rag_chain.invoke(prompt)
+            
+            try:
+                parsed_result = json.loads(result)
+                # Ensure we have all required fields
+                if "signals" not in parsed_result:
+                    parsed_result["signals"] = list(set(finder_signals + missing_signals))
+                if "confidence" not in parsed_result:
+                    parsed_result["confidence"] = 0.5
+                if "notes" not in parsed_result:
+                    parsed_result["notes"] = "Analysis completed"
+                
+                return parsed_result
+            except json.JSONDecodeError:
+                return {
+                    "signals": list(set(finder_signals + missing_signals)),
+                    "notes": f"JSON parse failed, raw response: {result[:200]}...",
+                    "confidence": 0.0,
+                    "raw_response": result,
+                    "error": "Could not parse JSON response"
+                }
+                
+        except Exception as e:
+            return {
+                "signals": list(set(finder_signals + missing_signals)),
+                "notes": f"LangChain RAG analysis failed: {str(e)}",
+                "confidence": 0.0,
+                "error": str(e)
             }
 
 
