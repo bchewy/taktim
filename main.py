@@ -27,14 +27,17 @@ from fastapi.responses import Response
 from pydantic import BaseModel, Field, validator
 from pydantic_settings import BaseSettings
 from tenacity import retry, stop_after_attempt, wait_exponential
-from sklearn.feature_extraction.text import TfidfVectorizer
-from sklearn.metrics.pairwise import cosine_similarity
+
+# OpenAI API for LLM integration
+from openai import AsyncOpenAI
+
+# LangChain RAG system
 try:
-    from mem0 import Memory
-    MEM0_AVAILABLE = True
+    from langchain_rag import LangChainRAGSystem, create_enhanced_rag_system
+    LANGCHAIN_AVAILABLE = True
 except ImportError:
-    MEM0_AVAILABLE = False
-    print("Warning: Mem0 not available, falling back to TF-IDF")
+    LANGCHAIN_AVAILABLE = False
+    print("Error: LangChain not available. Please install: pip install langchain-openai langchain-pinecone")
 
 # Import our scraping clients
 try:
@@ -63,9 +66,12 @@ class Settings(BaseSettings):
     firecrawl_api_key: str = ""
     exa_api_key: str = ""
     perplexity_api_key: str = ""
-    mem0_key: str = ""
+    pinecone_api_key: str = ""
     rag_topk: int = 6
     policy_version: str = "v0.1.0"
+    use_rules_engine: bool = False  # Toggle: True = rules engine decides, False = LLM decides (default)
+    skip_indexing: bool = False  # Toggle: True = skip vector store indexing, False = index documents (default)
+    skip_scraping: bool = False  # Toggle: True = skip scraping documents, False = scrape documents (default)
     
     model_config = {"env_file": ".env", "extra": "ignore"}
 
@@ -111,6 +117,7 @@ class JudgeOut(BaseModel):
     signals: List[str]
     notes: str
     confidence: float
+    llm_decision: Optional[bool] = None  # Only set when LLM makes final decision
 
 class SignalSet(BaseModel):
     tags: Set[str] = set()
@@ -275,133 +282,340 @@ class RulesEngine:
 
 rules_engine = RulesEngine()
 
-# Mock LLM Integration (for demo purposes - replace with actual API calls)
+# Real OpenAI LLM Integration
 class LLMClient:
     def __init__(self):
-        self.client = httpx.AsyncClient(timeout=10.0)
+        if not settings.openai_api_key:
+            raise ValueError("OPENAI_API_KEY is required for LLM integration")
+        
+        self.client = AsyncOpenAI(api_key=settings.openai_api_key)
+        self.model = "gpt-5-2025-08-07"  # Using GPT-5 for best compliance reasoning
     
     @retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=4, max=10))
-    async def call_openai(self, messages: List[Dict], model: str = "gpt-3.5-turbo") -> Dict:
-        # Mock implementation - in production, use actual OpenAI API
-        return {
-            "choices": [{
-                "message": {
-                    "content": json.dumps({
-                        "signals": ["personalization", "EU"],
-                        "claims": [{"regulation": "EU-DSA", "why": "Personalized content", "citations": ["chunk_1"]}],
-                        "confidence": 0.8,
-                        "notes": "Personalized recommender system in EU jurisdiction"
-                    })
-                }
-            }]
-        }
+    async def call_openai(self, messages: List[Dict], model: str = None) -> Dict:
+        """Call OpenAI API with retry logic"""
+        try:
+            print(f"🤖 Calling OpenAI API with model: {model or self.model}")
+            print(f"📝 Message count: {len(messages)}")
+            print(f"📏 Total prompt length: {sum(len(str(msg)) for msg in messages)} chars")
+            
+            response = await self.client.chat.completions.create(
+                model=model or self.model,
+                messages=messages,
+                # temperature=1.0,  # GPT-5 only supports default temperature (1.0)
+                max_completion_tokens=4000,  # Increased token limit for GPT-5
+                response_format={"type": "json_object"}  # Required for structured output
+            )
+            
+            print(f"✅ OpenAI API response received")
+            print(f"📊 Response details: finish_reason={response.choices[0].finish_reason}")
+            print(f"📊 Content length: {len(response.choices[0].message.content or '')} chars")
+            
+            content = response.choices[0].message.content or ""
+            print(f"🔍 Raw content preview: '{content[:100]}...'")
+            
+            return {
+                "choices": [{
+                    "message": {
+                        "content": content
+                    }
+                }]
+            }
+        except Exception as e:
+            print(f"OpenAI API error: {e}")
+            raise
     
     async def finder(self, artifact: FeatureArtifact, chunks: List[Chunk]) -> FinderOut:
-        # Mock finder - replace with actual LLM call
-        return FinderOut(
-            signals=["personalization", "EU"],
-            claims=[{"regulation": "EU-DSA", "why": "Personalized content", "citations": ["chunk_1"]}],
-            citations=["chunk_1"]
-        )
+        """Find compliance signals and regulations using GPT-4"""
+        
+        # Prepare context from retrieved chunks
+        context = "\n\n".join([
+            f"Source: {chunk.metadata.get('source', 'unknown')}\n"
+            f"Content: {chunk.content}\n"
+            f"Metadata: {chunk.metadata}"
+            for chunk in chunks[:10]  # Limit to top 10 chunks to stay within token limits
+        ])
+        
+        messages = [
+            {
+                "role": "system",
+                "content": "You are a legal compliance expert analyzing software features for geographical regulatory compliance. Your job is to find compliance signals and identify relevant regulations based on legal documents provided as context."
+            },
+            {
+                "role": "user", 
+                "content": f"""Analyze this software feature for geographical compliance requirements:
+
+**Feature:** {artifact.title}
+**Description:** {artifact.description}
+**Documentation:** {' '.join(artifact.docs)}
+**Code Hints:** {' '.join(artifact.code_hints)}
+**Tags:** {', '.join(artifact.tags)}
+
+**Legal Context:**
+{context}
+
+Based on the legal context provided, identify:
+1. Compliance signals (keywords/concepts that suggest regulatory requirements)
+2. Specific regulations that may apply
+3. Why each regulation applies
+4. Citations to specific chunks that support your analysis
+
+Return your analysis as JSON with this structure:
+{{
+  "signals": ["list of compliance signals found"],
+  "claims": [
+    {{
+      "regulation": "regulation name", 
+      "why": "explanation why this regulation applies",
+      "citations": ["chunk reference"]
+    }}
+  ],
+  "citations": ["list of all chunk references used"]
+}}"""
+            }
+        ]
+        
+        try:
+            response = await self.call_openai(messages)
+            content = response["choices"][0]["message"]["content"]
+            
+            # Debug: print the raw response
+            print(f"🔍 Finder raw response: {content[:200]}...")
+            
+            if not content or content.strip() == "":
+                print("⚠️  Empty response from LLM")
+                return FinderOut(signals=[], claims=[], citations=[])
+            
+            result = json.loads(content)
+            
+            return FinderOut(
+                signals=result.get("signals", []),
+                claims=result.get("claims", []),
+                citations=result.get("citations", [])
+            )
+        except json.JSONDecodeError as e:
+            print(f"Finder JSON decode error: {e}")
+            print(f"Raw response: {content}")
+            return FinderOut(signals=[], claims=[], citations=[])
+        except Exception as e:
+            print(f"Finder LLM call failed: {e}")
+            return FinderOut(signals=[], claims=[], citations=[])
     
     async def counter(self, artifact: FeatureArtifact, chunks: List[Chunk]) -> CounterOut:
-        # Mock counter - replace with actual LLM call
-        return CounterOut(
-            counter_points=["May be business geofencing"],
-            missing_signals=["explicit_geo_targeting"],
-            citations=["chunk_2"]
-        )
-    
-    async def judge(self, artifact: FeatureArtifact, finder_out: FinderOut, counter_out: CounterOut) -> JudgeOut:
-        # Mock judge - replace with actual LLM call
-        all_signals = list(set(finder_out.signals + counter_out.missing_signals))
-        return JudgeOut(
-            signals=all_signals,
-            notes="Personalized recommender system likely requires EU compliance",
-            confidence=0.81
-        )
+        """Find counter-arguments and missing signals using GPT-4"""
+        
+        context = "\n\n".join([
+            f"Source: {chunk.metadata.get('source', 'unknown')}\n"
+            f"Content: {chunk.content}\n"
+            f"Metadata: {chunk.metadata}"
+            for chunk in chunks[:10]
+        ])
+        
+        messages = [
+            {
+                "role": "system",
+                "content": "You are a legal compliance expert. Your job is to find counter-arguments and identify missing compliance signals that might suggest a feature does NOT require geographical regulatory compliance."
+            },
+            {
+                "role": "user",
+                "content": f"""Analyze this software feature for potential exemptions or counter-arguments to geographical compliance:
 
+**Feature:** {artifact.title}
+**Description:** {artifact.description}
+**Documentation:** {' '.join(artifact.docs)}
+**Code Hints:** {' '.join(artifact.code_hints)}
+**Tags:** {', '.join(artifact.tags)}
+
+**Legal Context:**
+{context}
+
+Find counter-arguments and missing signals that might suggest this feature does NOT require geographical compliance:
+1. Counter-points (arguments against compliance requirements)
+2. Missing signals (compliance indicators that are notably absent)
+3. Citations supporting your counter-analysis
+
+Return as JSON:
+{{
+  "counter_points": ["list of arguments against compliance requirements"],
+  "missing_signals": ["list of compliance signals that are notably missing"],
+  "citations": ["list of chunk references"]
+}}"""
+            }
+        ]
+        
+        try:
+            response = await self.call_openai(messages)
+            content = response["choices"][0]["message"]["content"]
+            
+            # Debug: print the raw response
+            print(f"🔄 Counter raw response: {content[:200]}...")
+            
+            if not content or content.strip() == "":
+                print("⚠️  Empty response from Counter LLM")
+                return CounterOut(counter_points=[], missing_signals=[], citations=[])
+            
+            result = json.loads(content)
+            
+            return CounterOut(
+                counter_points=result.get("counter_points", []),
+                missing_signals=result.get("missing_signals", []),
+                citations=result.get("citations", [])
+            )
+        except json.JSONDecodeError as e:
+            print(f"Counter JSON decode error: {e}")
+            print(f"Raw response: {content}")
+            return CounterOut(counter_points=[], missing_signals=[], citations=[])
+        except Exception as e:
+            print(f"Counter LLM call failed: {e}")
+            return CounterOut(counter_points=[], missing_signals=[], citations=[])
+    
+    async def judge(self, artifact: FeatureArtifact, finder_out: FinderOut, counter_out: CounterOut, make_decision: bool = False) -> JudgeOut:
+        """Make final compliance decision using GPT-4"""
+        
+        if make_decision:
+            # LLM makes the final decision
+            system_msg = "You are a senior legal compliance expert making final decisions on whether software features require geographical regulatory compliance. You must weigh evidence for and against compliance requirements."
+            instructions = """**Instructions:**
+1. Synthesize all evidence for and against
+2. Make a final determination on compliance requirements  
+3. Assign a confidence score (0.0-1.0)
+4. Combine all relevant signals found
+5. Provide clear reasoning
+
+Return as JSON:
+{{
+  "signals": ["combined list of all relevant signals"],
+  "notes": "detailed reasoning for your decision", 
+  "confidence": 0.85,
+  "requires_compliance": true
+}}"""
+        else:
+            # LLM only analyzes, doesn't decide (original PRD behavior)
+            system_msg = "You are a legal compliance expert. Merge findings from compliance analysis. Normalize signals and provide confidence, but do NOT make the final YES/NO decision - that will be handled by a separate rules engine."
+            instructions = """**Instructions:**
+1. Synthesize all evidence for and against
+2. Combine all relevant signals found
+3. Assign a confidence score (0.0-1.0) for the analysis quality
+4. Provide clear reasoning notes
+5. DO NOT make the final compliance decision
+
+Return as JSON:
+{{
+  "signals": ["combined list of all relevant signals"],
+  "notes": "detailed reasoning and analysis",
+  "confidence": 0.85
+}}"""
+        
+        messages = [
+            {
+                "role": "system",
+                "content": system_msg
+            },
+            {
+                "role": "user",
+                "content": f"""Analyze this software feature for geographical regulatory compliance:
+
+**Feature:** {artifact.title}
+**Description:** {artifact.description}
+
+**Evidence FOR compliance (from finder analysis):**
+- Signals found: {', '.join(finder_out.signals)}
+- Regulatory claims: {json.dumps(finder_out.claims, indent=2)}
+
+**Evidence AGAINST compliance (from counter analysis):**
+- Counter-points: {', '.join(counter_out.counter_points)}
+- Missing signals: {', '.join(counter_out.missing_signals)}
+
+{instructions}"""
+            }
+        ]
+        
+        try:
+            response = await self.call_openai(messages)
+            content = response["choices"][0]["message"]["content"]
+            
+            # Debug: print the raw response
+            print(f"⚖️  Judge raw response: {content[:200]}...")
+            
+            if not content or content.strip() == "":
+                print("⚠️  Empty response from Judge LLM")
+                all_signals = list(set(finder_out.signals + counter_out.missing_signals))
+                return JudgeOut(
+                    signals=all_signals,
+                    notes="Empty response from LLM",
+                    confidence=0.0
+                )
+            
+            result = json.loads(content)
+            
+            # Combine signals from finder and counter analysis
+            all_signals = list(set(finder_out.signals + counter_out.missing_signals))
+            
+            judge_out = JudgeOut(
+                signals=result.get("signals", all_signals),
+                notes=result.get("notes", "Analysis completed"),
+                confidence=result.get("confidence", 0.5)
+            )
+            
+            # If LLM is making decision, store it in the notes for later use
+            if make_decision and "requires_compliance" in result:
+                judge_out.llm_decision = result.get("requires_compliance", False)
+            
+            return judge_out
+            
+        except json.JSONDecodeError as e:
+            print(f"Judge JSON decode error: {e}")
+            print(f"Raw response: {content}")
+            all_signals = list(set(finder_out.signals + counter_out.missing_signals))
+            return JudgeOut(
+                signals=all_signals,
+                notes=f"JSON decode failed: {str(e)}",
+                confidence=0.0
+            )
+        except Exception as e:
+            print(f"Judge LLM call failed: {e}")
+            # Fallback logic
+            all_signals = list(set(finder_out.signals + counter_out.missing_signals))
+            return JudgeOut(
+                signals=all_signals,
+                notes=f"LLM analysis failed: {str(e)}",
+                confidence=0.0
+            )
+
+# Initialize LLM client
 llm_client = LLMClient()
 
-# Hybrid RAG System: Mem0 Primary + TF-IDF Fallback
+# LangChain RAG System Only
 class RAGSystem:
     def __init__(self):
+        if not LANGCHAIN_AVAILABLE:
+            raise ImportError("LangChain is required. Please install: pip install langchain-openai langchain-pinecone")
+        
+        if not settings.openai_api_key:
+            raise ValueError("OPENAI_API_KEY is required for LangChain RAG")
+        
+        if not settings.pinecone_api_key:
+            raise ValueError("PINECONE_API_KEY is required for Pinecone vector store")
+        
+        # Initialize LangChain RAG with Pinecone
+        try:
+            from langchain_rag import LangChainRAGSystem, LangChainRAGSettings
+            rag_settings = LangChainRAGSettings(
+                openai_api_key=settings.openai_api_key,
+                pinecone_api_key=settings.pinecone_api_key
+            )
+            self.langchain_rag = LangChainRAGSystem(settings=rag_settings)
+            print("✅ LangChain RAG initialized successfully - will use Pinecone vector search")
+        except Exception as e:
+            print(f"❌ LangChain RAG initialization failed: {e}")
+            raise
+        
         self.chunks = []
-        self.use_mem0 = False
-        self.memory = None
-        
-        # Try to initialize Mem0 first (primary)
-        if MEM0_AVAILABLE:
-            try:
-                # Set OpenAI API key in environment for Mem0 to use
-                if settings.openai_api_key and settings.openai_api_key.startswith('sk-'):
-                    os.environ['OPENAI_API_KEY'] = settings.openai_api_key
-                    print(f"🔑 OpenAI API key loaded: {settings.openai_api_key[:20]}...")
-                
-                # Configure Mem0 to use cloud service with API key
-                if settings.mem0_key and settings.mem0_key.startswith('m0-'):
-                    # Use Mem0 cloud service
-                    config = {
-                        "mem0_api_key": settings.mem0_key
-                    }
-                    print("🚀 Using Mem0 cloud service with API key")
-                else:
-                    # Fallback to self-hosted with local ChromaDB
-                    config = {
-                        "vector_store": {
-                            "provider": "chroma",
-                            "config": {
-                                "collection_name": "geogov_legal_docs",
-                                "path": "data/mem0_chroma"
-                            }
-                        },
-                        # Configure LLM to preserve content instead of summarizing
-                        "llm": {
-                            "provider": "openai",
-                            "config": {
-                                "api_key": settings.openai_api_key,
-                                "model": "gpt-4o-mini",
-                                "temperature": 0.1,
-                                "max_tokens": 4000
-                            }
-                        }
-                    }
-                    
-                    # Only add embedder if we have OpenAI key
-                    if settings.openai_api_key and settings.openai_api_key.startswith('sk-'):
-                        config["embedder"] = {
-                            "provider": "openai", 
-                            "config": {
-                                "api_key": settings.openai_api_key,
-                                "model": "text-embedding-3-small"
-                            }
-                        }
-                    print("🚀 Using Mem0 self-hosted with local ChromaDB")
-                
-                self.memory = Memory.from_config(config)
-                self.use_mem0 = True
-                print("✅ Mem0 initialized successfully - will use semantic search for legal documents")
-                
-            except Exception as e:
-                print(f"⚠️  Mem0 initialization failed: {e}")
-                print("📋 Falling back to TF-IDF system")
-                
-        # Initialize TF-IDF fallback system (always initialize for potential fallback)
-        self.vectorizer = TfidfVectorizer(
-            max_features=5000,
-            stop_words='english',
-            ngram_range=(1, 2)
-        )
-        self.doc_vectors = None
-        
-        if not self.use_mem0:
-            print("📊 Initialized TF-IDF fallback system")
     
     def index_documents(self, docs: List[RawDoc]) -> int:
         self.chunks = []
-        indexed_count = 0
         
-        # Create chunks for all systems
+        # Create chunks for reference
         for i, doc in enumerate(docs):
             chunk = Chunk(
                 id=f"legal_doc_{i}",
@@ -411,192 +625,62 @@ class RAGSystem:
             )
             self.chunks.append(chunk)
         
-        if self.use_mem0 and self.memory:
-            # Index into Mem0 as memories (legal documents)
+        # Convert to ScrapedDocument format for LangChain
+        try:
+            from langchain_rag import ScrapedDocument
+            from datetime import datetime
+            
+            scraped_docs = []
             for chunk in self.chunks:
-                try:
-                    # Store legal document as memory with rich metadata
-                    print(f"📝 Adding document {chunk.id} to Mem0...")
-                    
-                    # Fix: Mem0 expects messages in proper format
-                    try:
-                        # Store full legal document content in Mem0
-                        messages = [
-                            {
-                                "role": "user", 
-                                "content": f"Store this complete legal regulation document: {chunk.content}"
-                            },
-                            {
-                                "role": "assistant",
-                                "content": f"I will store the complete legal regulation from {chunk.source} covering {chunk.metadata.get('jurisdiction', 'general')} jurisdiction."
-                            }
-                        ]
-                        result = self.memory.add(
-                            user_id="legal_corpus",  # Common user_id for all legal docs
-                            messages=messages,
-                            infer=False,  # Disable automatic inference/summarization
-                            metadata={
-                                "document_id": chunk.id,
-                                "source": chunk.source,
-                                "jurisdiction": chunk.metadata.get("jurisdiction", "unknown"),
-                                "topic": chunk.metadata.get("topic", "regulation"),
-                                "document_type": "legal_regulation",
-                                "full_content": chunk.content,  # Store full content in metadata too
-                                **chunk.metadata
-                            }
-                        )
-                        print(f"📝 Method 1 - Proper messages format - result: {result}")
-                        
-                        # Fix: Add 5-second delay for write transaction to complete (Issue #2386)
-                        import time
-                        time.sleep(5)  # Increased to 5 seconds as per GitHub fix
-                        
-                    except Exception as e1:
-                        print(f"📝 Method 1 failed: {e1}")
-                        
-                        try:
-                            # Method 2: Messages format (original approach)
-                            result = self.memory.add(
-                                user_id="legal_corpus",
-                                messages=[{
-                                    "role": "user", 
-                                    "content": chunk.content
-                                }],
-                                metadata={
-                                    "document_id": chunk.id,
-                                    "source": chunk.source,
-                                    "jurisdiction": chunk.metadata.get("jurisdiction", "unknown"),
-                                    "topic": chunk.metadata.get("topic", "regulation"),
-                                    "document_type": "legal_regulation",
-                                }
-                            )
-                            print(f"📝 Method 2 - Messages format - result: {result}")
-                        except Exception as e2:
-                            print(f"📝 Method 2 also failed: {e2}")
-                            result = {"error": str(e2)}
-                    
-                    indexed_count += 1
-                    
-                except Exception as e:
-                    print(f"Warning: Could not index document {chunk.id} into Mem0: {e}")
-                    continue
+                scraped_doc = ScrapedDocument(
+                    url=chunk.source,
+                    title=chunk.metadata.get('title', f"Legal Document {chunk.id}"),
+                    content=chunk.content,
+                    source=chunk.metadata.get('source', 'unknown'),
+                    regulation=chunk.metadata.get('regulation', 'unknown'),
+                    jurisdiction=chunk.metadata.get('jurisdiction', 'unknown'),
+                    scraped_at=datetime.now().isoformat(),
+                    content_length=len(chunk.content)
+                )
+                scraped_docs.append(scraped_doc)
             
-            print(f"📚 Indexed {indexed_count} legal documents into Mem0 memory")
+            # Index into LangChain RAG
+            import asyncio
+            indexed_count = asyncio.run(self.langchain_rag.index_scraped_documents(scraped_docs))
+            print(f"📚 Indexed {indexed_count} chunks into LangChain RAG system")
+            return indexed_count
             
-            # Fix: Explicitly persist ChromaDB data
-            try:
-                if hasattr(self.memory, 'client') and hasattr(self.memory.client, 'persist'):
-                    self.memory.client.persist()
-                    print("💾 Explicitly persisted ChromaDB data")
-                elif hasattr(self.memory, 'vector_store') and hasattr(self.memory.vector_store, 'persist'):
-                    self.memory.vector_store.persist()
-                    print("💾 Explicitly persisted vector store data")
-            except Exception as e:
-                print(f"⚠️  Could not explicitly persist data: {e}")
-            
-            # Add another delay after persistence
-            import time
-            time.sleep(2)
-            print("⏳ Additional delay after persistence...")
-            
-            # Verification: Check if memories were actually stored
-            try:
-                all_memories = self.memory.get_all(user_id="legal_corpus")
-                print(f"🔍 Verification: Found {len(all_memories.get('results', []))} memories stored in Mem0")
-                if len(all_memories.get('results', [])) == 0:
-                    print("⚠️  WARNING: No memories found after indexing! This is a known Mem0 issue.")
-            except Exception as e:
-                print(f"⚠️  Could not verify memory storage: {e}")
-        
-        # Always prepare TF-IDF fallback (even when using Mem0)
-        if self.chunks:
-            corpus = [chunk.content for chunk in self.chunks]
-            self.doc_vectors = self.vectorizer.fit_transform(corpus)
-            
-            if not self.use_mem0:
-                indexed_count = len(self.chunks)
-                print(f"📊 Indexed {indexed_count} documents with TF-IDF fallback")
-        
-        return indexed_count
+        except Exception as e:
+            print(f"❌ Could not index documents into LangChain RAG: {e}")
+            raise
     
     def retrieve(self, query: str, k: int = 6) -> List[Chunk]:
-        if self.use_mem0 and self.memory:
-            return self._retrieve_with_mem0(query, k)
-        else:
-            return self._retrieve_with_tfidf(query, k)
-    
-    def _retrieve_with_mem0(self, query: str, k: int = 6) -> List[Chunk]:
         try:
-            # Search legal document memories with semantic search
-            memories = self.memory.search(
-                user_id="legal_corpus",
-                query=f"Legal regulations related to: {query}",
-                limit=k
-            )
+            # Use LangChain's vector retrieval
+            docs = self.langchain_rag.retrieve(query, k)
             
-            print(f"🔍 Mem0 returned memories: {memories}")
-            
-            # Extract relevant chunks from Mem0 search results
+            # Convert back to Chunk format for compatibility
             relevant_chunks = []
-            if memories.get('results'):
-                # Process Mem0 memories into chunks with full content
-                for memory in memories['results'][:k]:
-                    chunk_id = memory.get('metadata', {}).get('document_id', f"mem0_{len(relevant_chunks)}")
-                    
-                    # Use full content from metadata if available, otherwise use memory content
-                    full_content = memory.get('metadata', {}).get('full_content')
-                    if full_content:
-                        content = full_content  # Use the complete legal document
-                        print(f"✅ Using full legal document content from Mem0 metadata ({len(content)} chars)")
-                    else:
-                        content = memory.get('memory', '')  # Fallback to memory content
-                        print(f"⚠️  Using Mem0 memory content ({len(content)} chars) - may be summarized")
-                    
-                    source = memory.get('metadata', {}).get('source', 'unknown')
-                    
-                    chunk = Chunk(
-                        id=chunk_id,
-                        content=content,
-                        source=source,
-                        metadata=memory.get('metadata', {})
-                    )
-                    relevant_chunks.append(chunk)
-                    
-                print(f"🎯 Using {len(relevant_chunks)} documents from Mem0 semantic search")
-            else:
-                print("⚠️  No Mem0 memories found - this shouldn't happen if storage worked")
+            for doc in docs:
+                chunk = Chunk(
+                    id=f"langchain_{len(relevant_chunks)}",
+                    content=doc.page_content,
+                    source=doc.metadata.get('url', 'unknown'),
+                    metadata=doc.metadata
+                )
+                relevant_chunks.append(chunk)
             
-            print(f"🔍 Mem0 semantic search found {len(relevant_chunks)} relevant legal documents")
+            print(f"🔍 LangChain RAG found {len(relevant_chunks)} relevant legal documents")
             return relevant_chunks
             
         except Exception as e:
-            print(f"Warning: Mem0 retrieval failed: {e}, falling back to TF-IDF")
-            return self._retrieve_with_tfidf(query, k)
+            print(f"❌ LangChain retrieval failed: {e}")
+            return []
     
-    def _retrieve_with_tfidf(self, query: str, k: int = 6) -> List[Chunk]:
-        if not self.chunks or self.doc_vectors is None:
-            return []
-        
-        try:
-            query_vector = self.vectorizer.transform([query])
-            similarities = cosine_similarity(query_vector, self.doc_vectors).flatten()
-            top_indices = np.argsort(similarities)[::-1][:k]
-            
-            relevant_chunks = []
-            for idx in top_indices:
-                if similarities[idx] > 0.01:
-                    relevant_chunks.append(self.chunks[idx])
-            
-            print(f"📊 TF-IDF search found {len(relevant_chunks)} relevant documents")
-            return relevant_chunks
-            
-        except Exception as e:
-            print(f"Warning: Could not perform TF-IDF retrieval: {e}")
-            return []
     
     def hydrate_citations(self, chunk_ids: List[str]) -> List[Citation]:
         citations = []
-        # If no specific chunk_ids provided, use all chunks (Mem0 case)
+        # If no specific chunk_ids provided, use all chunks
         if not chunk_ids and self.chunks:
             citations.append(Citation(
                 source=self.chunks[0].source,
@@ -740,8 +824,49 @@ class ScrapingAggregator:
         
         return all_docs
     
-    async def refresh_corpus_for_regulations(self, regulations: List[Dict[str, str]]) -> Dict[str, Any]:
-        """Refresh the corpus with content for multiple regulations"""
+    async def refresh_corpus_for_regulations(self, regulations: List[Dict[str, str]], force_refresh: bool = False) -> Dict[str, Any]:
+        """Refresh the corpus with content for multiple regulations using enhanced scraping"""
+        
+        # Use LangChain RAG system with full document scraping
+        return await self._refresh_with_langchain_rag(regulations, force_refresh=force_refresh)
+    
+    async def _refresh_with_langchain_rag(self, regulations: List[Dict[str, str]], force_refresh: bool = False) -> Dict[str, Any]:
+        """Enhanced refresh using LangChain RAG with full document scraping"""
+        sources_count = {}
+        total_indexed = 0
+        
+        for reg in regulations:
+            name = reg.get("name", "")
+            jurisdiction = reg.get("jurisdiction", "")
+            
+            if not name:
+                continue
+                
+            refresh_mode = "force refresh" if force_refresh else "smart refresh"
+            print(f"\n📋 Processing with LangChain RAG ({refresh_mode}): {name} ({jurisdiction})")
+            
+            try:
+                # Use LangChain RAG to find URLs, scrape, and index documents
+                indexed_count = await rag_system.langchain_rag.index_regulation_from_search_apis(
+                    name, jurisdiction, self.perplexity_client, self.exa_client, force_refresh=force_refresh, skip_indexing=settings.skip_indexing
+                )
+                sources_count[f"{name}_{jurisdiction}"] = indexed_count
+                total_indexed += indexed_count
+                
+            except Exception as e:
+                print(f"⚠️  LangChain RAG processing failed for {name}: {e}")
+                sources_count[f"{name}_{jurisdiction}"] = 0
+        
+        return {
+            "ingested": total_indexed,
+            "regulations_processed": len(regulations),
+            "sources": sources_count,
+            "system": "langchain_rag",
+            "force_refresh": force_refresh
+        }
+    
+    async def _refresh_with_summaries(self, regulations: List[Dict[str, str]]) -> Dict[str, Any]:
+        """Fallback refresh using summaries/snippets (original approach)"""
         all_docs = []
         sources_count = {}
         
@@ -752,7 +877,7 @@ class ScrapingAggregator:
             if not name:
                 continue
                 
-            print(f"\n📋 Researching: {name} ({jurisdiction})")
+            print(f"\n📋 Researching (summary mode): {name} ({jurisdiction})")
             regulation_docs = await self.search_regulation(name, jurisdiction)
             all_docs.extend(regulation_docs)
             
@@ -766,7 +891,8 @@ class ScrapingAggregator:
         return {
             "ingested": len(all_docs),
             "regulations_processed": len(sources_count),
-            "sources": sources_count
+            "sources": sources_count,
+            "system": "langchain_rag"
         }
     
     async def close(self):
@@ -873,23 +999,44 @@ async def analyze(artifact: FeatureArtifact) -> Decision:
     # LLM ensemble
     finder_out = await llm_client.finder(artifact, chunks)
     counter_out = await llm_client.counter(artifact, chunks)
-    judge_out = await llm_client.judge(artifact, finder_out, counter_out)
     
-    # Rules engine final decision
-    text = f"{artifact.title} {artifact.description}"
-    verdict = rules_engine.evaluate(sigs, text)
+    # Toggle: LLM vs Rules Engine decision
+    use_llm_decision = not settings.use_rules_engine
+    judge_out = await llm_client.judge(artifact, finder_out, counter_out, make_decision=use_llm_decision)
+    
+    # Decision logic based on toggle
+    if use_llm_decision:
+        # LLM makes the final decision
+        needs_compliance = judge_out.llm_decision if judge_out.llm_decision is not None else False
+        reasoning = judge_out.notes
+        regulations = []  # Extract from finder_out.claims if needed
+        matched_rules = ["LLM_DECISION"]
+        
+        # Extract regulations from LLM claims
+        for claim in finder_out.claims:
+            if isinstance(claim, dict) and "regulation" in claim:
+                regulations.append(claim["regulation"])
+        
+    else:
+        # Rules engine makes the final decision (original behavior)
+        text = f"{artifact.title} {artifact.description}"
+        verdict = rules_engine.evaluate(sigs, text)
+        needs_compliance = verdict.ok
+        reasoning = verdict.reason
+        regulations = verdict.regulations
+        matched_rules = verdict.matched_ids
     
     # Create decision
     all_signals = list(set(sigs.to_list() + judge_out.signals))
     decision = Decision(
         feature_id=artifact.feature_id,
-        needs_geo_compliance=verdict.ok,
-        reasoning=verdict.reason,
-        regulations=verdict.regulations,
+        needs_geo_compliance=needs_compliance,
+        reasoning=reasoning,
+        regulations=regulations,
         signals=all_signals,
         citations=rag_system.hydrate_citations(finder_out.citations[:3]),
         confidence=judge_out.confidence,
-        matched_rules=verdict.matched_ids,
+        matched_rules=matched_rules,
         ts=get_utc_timestamp(),
         policy_version=settings.policy_version
     )
@@ -1040,87 +1187,25 @@ SEC. 2. Chapter 22.1 (commencing with Section 22675) is added to Division 8 of t
         }
     }
 
-@app.get("/api/memories")
-async def get_memories():
-    """Debug endpoint to check what memories are stored in Mem0"""
-    if rag_system.use_mem0 and rag_system.memory:
-        try:
-            # Try different ways to get memories
-            results = {}
-            
-            # Method 1: get_all with legal_corpus user_id
-            try:
-                memories1 = rag_system.memory.get_all(user_id="legal_corpus")
-                results["legal_corpus"] = memories1
-            except Exception as e:
-                results["legal_corpus_error"] = str(e)
-            
-            # Method 2: Try individual document user_ids
-            try:
-                memories2 = rag_system.memory.get_all(user_id="legal_doc_0")
-                results["legal_doc_0"] = memories2
-            except Exception as e:
-                results["legal_doc_0_error"] = str(e)
-                
-            try:
-                memories3 = rag_system.memory.get_all(user_id="legal_doc_1")  
-                results["legal_doc_1"] = memories3
-            except Exception as e:
-                results["legal_doc_1_error"] = str(e)
-                
-            # Method 3: Try to see all user_ids or general info
-            try:
-                # Some Mem0 versions might have different methods
-                if hasattr(rag_system.memory, 'list_users'):
-                    results["users"] = rag_system.memory.list_users()
-                elif hasattr(rag_system.memory, 'get_users'):
-                    results["users"] = rag_system.memory.get_users()
-            except Exception as e:
-                results["users_error"] = str(e)
-            
-            return {
-                "system": "mem0",
-                "results": results,
-                "mem0_initialized": True,
-                "chunks_available": len(rag_system.chunks)
-            }
-            
-        except Exception as e:
-            return {
-                "error": str(e),
-                "system": "mem0",
-                "memory_count": 0
-            }
-    else:
+@app.get("/api/rag_status")
+async def get_rag_status():
+    """Debug endpoint to check RAG system status"""
+    try:
+        # Get LangChain RAG status
         return {
-            "message": "Using TF-IDF fallback, no Mem0 memories",
-            "system": "tfidf",
-            "chunks": len(rag_system.chunks)
+            "system": "langchain",
+            "langchain_initialized": True,
+            "chunks_available": len(rag_system.chunks),
+            "vectorstore_available": rag_system.langchain_rag.vectorstore is not None,
+            "rag_chain_available": rag_system.langchain_rag.rag_chain is not None
         }
-
-@app.post("/api/test_mem0")
-async def test_mem0():
-    """Simple test to verify Mem0 is working"""
-    if rag_system.use_mem0 and rag_system.memory:
-        try:
-            # Try a very simple add/get cycle
-            test_result = rag_system.memory.add(
-                user_id="test_user",
-                messages="This is a simple test memory for legal compliance."
-            )
-            
-            # Try to retrieve it
-            retrieved = rag_system.memory.get_all(user_id="test_user")
-            
-            return {
-                "add_result": test_result,
-                "get_result": retrieved,
-                "test": "simple_mem0_test"
-            }
-        except Exception as e:
-            return {"error": str(e), "test": "failed"}
-    else:
-        return {"error": "Mem0 not available"}
+        
+    except Exception as e:
+        return {
+            "error": str(e),
+            "system": "langchain",
+            "chunks_available": len(rag_system.chunks)
+        }
 
 # Initialize with some sample data
 @app.on_event("startup")

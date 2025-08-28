@@ -42,12 +42,17 @@ class AnalysisRunner:
             print(f"❌ Error parsing {inputs_file}: {e}")
             raise
     
-    async def refresh_knowledge_base(self, regulations: List[Dict]) -> Dict[str, Any]:
+    async def refresh_knowledge_base(self, regulations: List[Dict], force_refresh: bool = False, skip_scraping: bool = False) -> Dict[str, Any]:
         """Refresh the knowledge base with regulation research"""
-        print(f"\n🔄 Refreshing knowledge base with {len(regulations)} regulations...")
+        if skip_scraping:
+            print(f"\n⏭️  Skipping knowledge base refresh - using existing vector store only")
+            return {"ingested": 0, "skipped": True, "message": "Scraping skipped"}
+        
+        refresh_type = "force refresh" if force_refresh else "smart refresh"
+        print(f"\n🔄 {refresh_type.title()} of knowledge base with {len(regulations)} regulations...")
         
         try:
-            result = await scraping_aggregator.refresh_corpus_for_regulations(regulations)
+            result = await scraping_aggregator.refresh_corpus_for_regulations(regulations, force_refresh=force_refresh)
             print(f"✅ Knowledge base refreshed: {result['ingested']} documents indexed")
             return result
         except Exception as e:
@@ -207,7 +212,7 @@ class AnalysisRunner:
             "zip_path": zip_path if 'zip_path' in locals() else None
         }
     
-    async def run_complete_analysis(self, inputs_file: str = "inputs.yaml"):
+    async def run_complete_analysis(self, inputs_file: str = "inputs.yaml", force_refresh: bool = False, skip_scraping: bool = False):
         """Run the complete analysis workflow"""
         print(f"🚀 Starting GeoGov Analysis - Session: {self.session_id}")
         print("=" * 60)
@@ -225,7 +230,7 @@ class AnalysisRunner:
             # Refresh knowledge base if regulations are provided
             kb_result = None
             if regulations:
-                kb_result = await self.refresh_knowledge_base(regulations)
+                kb_result = await self.refresh_knowledge_base(regulations, force_refresh=force_refresh, skip_scraping=skip_scraping)
             
             # Run analysis
             decisions = await self.run_batch_analysis(test_features)
@@ -280,10 +285,31 @@ async def main():
     parser.add_argument("--inputs", "-i", default="inputs.yaml", help="Input configuration file")
     parser.add_argument("--feature", "-f", help="Analyze single feature by ID")
     parser.add_argument("--export-only", action="store_true", help="Only export existing results")
+    parser.add_argument("--force-refresh", action="store_true", help="Force re-embedding of all documents even if they exist")
+    parser.add_argument("--use-rules-engine", action="store_true", help="Use rules engine for final decision instead of LLM (default is LLM)")
+    parser.add_argument("--skip-indexing", action="store_true", help="Skip adding new documents to vector store (use existing index only)")
+    parser.add_argument("--skip-scraping", action="store_true", help="Skip scraping documents entirely (use existing vector store only)")
     
     args = parser.parse_args()
     
     runner = AnalysisRunner()
+    
+    # Override settings based on flags
+    from main import settings
+    
+    if args.use_rules_engine:
+        settings.use_rules_engine = True
+        print("🔧 Using rules engine for final compliance decisions instead of LLM")
+    else:
+        print("🤖 Using LLM for final compliance decisions (default)")
+        
+    if args.skip_indexing:
+        settings.skip_indexing = True
+        print("⏭️  Skipping vector store indexing - using existing index only")
+        
+    if args.skip_scraping:
+        settings.skip_scraping = True
+        print("⏭️  Skipping document scraping - using existing vector store only")
     
     if args.export_only:
         print("📊 Export mode - processing existing data...")
@@ -304,7 +330,7 @@ async def main():
         print(f"\n✅ Analysis complete for {decision.feature_id}")
     else:
         # Full batch analysis
-        await runner.run_complete_analysis(args.inputs)
+        await runner.run_complete_analysis(args.inputs, force_refresh=args.force_refresh, skip_scraping=args.skip_scraping)
 
 
 if __name__ == "__main__":
