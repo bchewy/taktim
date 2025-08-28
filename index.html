@@ -1,0 +1,490 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>GeoGov Compliance Analysis</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 20px;
+            background-color: #f5f5f5;
+        }
+        
+        .container {
+            background: white;
+            padding: 30px;
+            border-radius: 10px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+            margin-bottom: 20px;
+        }
+        
+        h1 {
+            color: #333;
+            text-align: center;
+            margin-bottom: 30px;
+        }
+        
+        .section {
+            margin-bottom: 40px;
+            border-bottom: 1px solid #eee;
+            padding-bottom: 30px;
+        }
+        
+        .section:last-child {
+            border-bottom: none;
+        }
+        
+        h2 {
+            color: #2563eb;
+            margin-bottom: 15px;
+        }
+        
+        .form-group {
+            margin-bottom: 15px;
+        }
+        
+        label {
+            display: block;
+            margin-bottom: 5px;
+            font-weight: 500;
+            color: #374151;
+        }
+        
+        input, textarea, select {
+            width: 100%;
+            padding: 10px;
+            border: 1px solid #d1d5db;
+            border-radius: 5px;
+            font-size: 14px;
+            box-sizing: border-box;
+        }
+        
+        textarea {
+            height: 100px;
+            resize: vertical;
+        }
+        
+        button {
+            background-color: #2563eb;
+            color: white;
+            padding: 12px 24px;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 14px;
+            margin-right: 10px;
+            margin-bottom: 10px;
+        }
+        
+        button:hover {
+            background-color: #1d4ed8;
+        }
+        
+        button:disabled {
+            background-color: #9ca3af;
+            cursor: not-allowed;
+        }
+        
+        .status {
+            margin-top: 15px;
+            padding: 10px;
+            border-radius: 5px;
+            font-family: monospace;
+        }
+        
+        .status.loading {
+            background-color: #fef3c7;
+            color: #92400e;
+        }
+        
+        .status.success {
+            background-color: #d1fae5;
+            color: #065f46;
+        }
+        
+        .status.error {
+            background-color: #fee2e2;
+            color: #991b1b;
+        }
+        
+        .response {
+            background-color: #f3f4f6;
+            border: 1px solid #d1d5db;
+            border-radius: 5px;
+            padding: 15px;
+            margin-top: 15px;
+            font-family: monospace;
+            font-size: 12px;
+            white-space: pre-wrap;
+            max-height: 400px;
+            overflow-y: auto;
+        }
+        
+        .grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 15px;
+        }
+        
+        .health-status {
+            display: inline-block;
+            padding: 4px 8px;
+            border-radius: 4px;
+            font-size: 12px;
+            font-weight: 500;
+        }
+        
+        .health-ok {
+            background-color: #d1fae5;
+            color: #065f46;
+        }
+        
+        .health-error {
+            background-color: #fee2e2;
+            color: #991b1b;
+        }
+        
+        .example-features {
+            background-color: #f8fafc;
+            border: 1px solid #e2e8f0;
+            border-radius: 5px;
+            padding: 15px;
+            margin-bottom: 15px;
+        }
+        
+        .example-feature {
+            background: white;
+            border: 1px solid #d1d5db;
+            border-radius: 4px;
+            padding: 10px;
+            margin-bottom: 10px;
+            cursor: pointer;
+            transition: border-color 0.2s;
+        }
+        
+        .example-feature:hover {
+            border-color: #2563eb;
+        }
+        
+        .example-feature h4 {
+            margin: 0 0 5px 0;
+            color: #1f2937;
+        }
+        
+        .example-feature p {
+            margin: 0;
+            font-size: 12px;
+            color: #6b7280;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🏛️ GeoGov Compliance Analysis Dashboard</h1>
+        
+        <!-- Health Check Section -->
+        <div class="section">
+            <h2>🔍 System Health</h2>
+            <button onclick="checkHealth()">Check Health</button>
+            <div id="health-status"></div>
+        </div>
+        
+        <!-- Single Analysis Section -->
+        <div class="section">
+            <h2>📋 Single Feature Analysis</h2>
+            
+            <div class="example-features">
+                <h3>Example Features (click to load):</h3>
+                <div class="example-feature" onclick="loadExample('personalized_feed')">
+                    <h4>Personalized Home Feed v3</h4>
+                    <p>Reranks videos using watch history; EU rollout planned</p>
+                </div>
+                <div class="example-feature" onclick="loadExample('ads_targeting')">
+                    <h4>Smart Ad Targeting</h4>
+                    <p>Behavioral targeting for minors with parental controls</p>
+                </div>
+                <div class="example-feature" onclick="loadExample('content_moderation')">
+                    <h4>AI Content Moderation</h4>
+                    <p>Automated takedown system with user appeals process</p>
+                </div>
+            </div>
+            
+            <div class="grid">
+                <div class="form-group">
+                    <label for="feature_id">Feature ID:</label>
+                    <input type="text" id="feature_id" placeholder="F-2381">
+                </div>
+                <div class="form-group">
+                    <label for="title">Title:</label>
+                    <input type="text" id="title" placeholder="Personalized Home Feed v3">
+                </div>
+            </div>
+            
+            <div class="form-group">
+                <label for="description">Description:</label>
+                <textarea id="description" placeholder="Detailed description of the feature..."></textarea>
+            </div>
+            
+            <div class="grid">
+                <div class="form-group">
+                    <label for="docs">Documentation URLs (comma-separated):</label>
+                    <input type="text" id="docs" placeholder="https://internal/prd, https://internal/trd">
+                </div>
+                <div class="form-group">
+                    <label for="tags">Tags (comma-separated):</label>
+                    <input type="text" id="tags" placeholder="recommender, personalization, minors_possible">
+                </div>
+            </div>
+            
+            <div class="form-group">
+                <label for="code_hints">Code Hints (comma-separated):</label>
+                <input type="text" id="code_hints" placeholder="uses ageGate(), if region in ['EU','EEA']:">
+            </div>
+            
+            <button onclick="analyzeSingle()">🔍 Analyze Feature</button>
+            <div id="single-status"></div>
+            <div id="single-response"></div>
+        </div>
+        
+        <!-- Bulk Analysis Section -->
+        <div class="section">
+            <h2>📊 Bulk Analysis</h2>
+            <div class="form-group">
+                <label for="bulk_features">Features JSON (array of feature objects):</label>
+                <textarea id="bulk_features" style="height: 200px;" placeholder='[{"feature_id": "F-001", "title": "Feature 1", "description": "...", "tags": ["tag1"], "code_hints": ["hint1"], "docs": ["url1"]}]'></textarea>
+            </div>
+            <button onclick="loadBulkExample()">Load Example Data</button>
+            <button onclick="analyzeBulk()">🚀 Bulk Analyze</button>
+            <div id="bulk-status"></div>
+            <div id="bulk-response"></div>
+        </div>
+        
+        <!-- Evidence Export Section -->
+        <div class="section">
+            <h2>📁 Evidence Export</h2>
+            <button onclick="downloadEvidence()">📦 Download Evidence ZIP</button>
+            <div id="evidence-status"></div>
+        </div>
+    </div>
+
+    <script>
+        const API_BASE = 'http://localhost:8000/api';
+        
+        // Example feature data
+        const examples = {
+            personalized_feed: {
+                feature_id: 'F-2381',
+                title: 'Personalized Home Feed v3',
+                description: 'Reranks videos using watch history; EU rollout planned. Uses machine learning to personalize content recommendations based on user behavior and preferences.',
+                docs: 'https://internal/prd, https://internal/trd',
+                tags: 'recommender, personalization, minors_possible',
+                code_hints: 'uses ageGate(), if region in ["EU","EEA"]:'
+            },
+            ads_targeting: {
+                feature_id: 'F-1205',
+                title: 'Smart Ad Targeting',
+                description: 'Behavioral targeting system that shows relevant ads to users. Includes special handling for users under 18 with parental consent mechanisms.',
+                docs: 'https://internal/ads-spec',
+                tags: 'ads, targeting, minors, behavioral',
+                code_hints: 'if user.age < 18:, checkParentalConsent(), targetingAllowed()'
+            },
+            content_moderation: {
+                feature_id: 'F-3456',
+                title: 'AI Content Moderation',
+                description: 'Automated system for detecting and removing harmful content. Provides users with appeal mechanisms and explanation of decisions for EU users.',
+                docs: 'https://internal/moderation-policy',
+                tags: 'moderation, AI, appeals, takedown',
+                code_hints: 'moderationDecision(), appealProcess(), if jurisdiction == "EU":'
+            }
+        };
+        
+        // Load example data into form
+        function loadExample(exampleKey) {
+            const example = examples[exampleKey];
+            if (!example) return;
+            
+            document.getElementById('feature_id').value = example.feature_id;
+            document.getElementById('title').value = example.title;
+            document.getElementById('description').value = example.description;
+            document.getElementById('docs').value = example.docs;
+            document.getElementById('tags').value = example.tags;
+            document.getElementById('code_hints').value = example.code_hints;
+            
+            showStatus('single-status', 'Example loaded! Ready to analyze.', 'success');
+        }
+        
+        // Load bulk example data
+        function loadBulkExample() {
+            const bulkData = Object.values(examples).map(example => ({
+                feature_id: example.feature_id,
+                title: example.title,
+                description: example.description,
+                docs: example.docs.split(', '),
+                tags: example.tags.split(', '),
+                code_hints: example.code_hints.split(', ')
+            }));
+            
+            document.getElementById('bulk_features').value = JSON.stringify(bulkData, null, 2);
+            showStatus('bulk-status', 'Example bulk data loaded!', 'success');
+        }
+        
+        // Utility functions
+        function showStatus(elementId, message, type = 'loading') {
+            const statusEl = document.getElementById(elementId);
+            statusEl.innerHTML = `<div class="status ${type}">${message}</div>`;
+        }
+        
+        function showResponse(elementId, data) {
+            const responseEl = document.getElementById(elementId);
+            responseEl.innerHTML = `<div class="response">${JSON.stringify(data, null, 2)}</div>`;
+        }
+        
+        async function makeRequest(url, options = {}) {
+            try {
+                const response = await fetch(url, {
+                    headers: {
+                        'Content-Type': 'application/json',
+                        ...options.headers
+                    },
+                    ...options
+                });
+                
+                if (!response.ok) {
+                    throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+                }
+                
+                return await response.json();
+            } catch (error) {
+                throw error;
+            }
+        }
+        
+        // API functions
+        async function checkHealth() {
+            showStatus('health-status', 'Checking system health...', 'loading');
+            
+            try {
+                const data = await makeRequest(`${API_BASE}/health`);
+                const healthBadge = data.ok ? 
+                    '<span class="health-status health-ok">✅ Healthy</span>' :
+                    '<span class="health-status health-error">❌ Error</span>';
+                
+                document.getElementById('health-status').innerHTML = `
+                    <div class="status success">
+                        ${healthBadge}<br>
+                        Rules Hash: ${data.rules_hash || 'N/A'}<br>
+                        Vector Store Docs: ${data.mem0_docs || 0}<br>
+                        Policy Version: ${data.policy_version || 'N/A'}
+                    </div>
+                `;
+                showResponse('health-status', data);
+            } catch (error) {
+                showStatus('health-status', `Health check failed: ${error.message}`, 'error');
+            }
+        }
+        
+        async function analyzeSingle() {
+            showStatus('single-status', 'Analyzing feature...', 'loading');
+            
+            // Collect form data
+            const featureData = {
+                feature_id: document.getElementById('feature_id').value,
+                title: document.getElementById('title').value,
+                description: document.getElementById('description').value,
+                docs: document.getElementById('docs').value.split(',').map(s => s.trim()).filter(s => s),
+                tags: document.getElementById('tags').value.split(',').map(s => s.trim()).filter(s => s),
+                code_hints: document.getElementById('code_hints').value.split(',').map(s => s.trim()).filter(s => s)
+            };
+            
+            if (!featureData.feature_id || !featureData.title || !featureData.description) {
+                showStatus('single-status', 'Please fill in at least Feature ID, Title, and Description', 'error');
+                return;
+            }
+            
+            try {
+                const data = await makeRequest(`${API_BASE}/analyze`, {
+                    method: 'POST',
+                    body: JSON.stringify(featureData)
+                });
+                
+                const complianceStatus = data.needs_geo_compliance ? '🚨 COMPLIANCE REQUIRED' : '✅ NO COMPLIANCE NEEDED';
+                const confidence = (data.confidence * 100).toFixed(1);
+                
+                showStatus('single-status', 
+                    `Analysis complete! ${complianceStatus} (${confidence}% confidence)`, 
+                    data.needs_geo_compliance ? 'error' : 'success'
+                );
+                showResponse('single-response', data);
+                
+            } catch (error) {
+                showStatus('single-status', `Analysis failed: ${error.message}`, 'error');
+            }
+        }
+        
+        async function analyzeBulk() {
+            showStatus('bulk-status', 'Running bulk analysis...', 'loading');
+            
+            let featuresData;
+            try {
+                featuresData = JSON.parse(document.getElementById('bulk_features').value);
+                if (!Array.isArray(featuresData)) {
+                    throw new Error('Features must be an array');
+                }
+            } catch (error) {
+                showStatus('bulk-status', `Invalid JSON: ${error.message}`, 'error');
+                return;
+            }
+            
+            try {
+                const data = await makeRequest(`${API_BASE}/bulk_analyze`, {
+                    method: 'POST',
+                    body: JSON.stringify({ items: featuresData })
+                });
+                
+                showStatus('bulk-status', 
+                    `Bulk analysis complete! Processed ${data.count} features. CSV: ${data.csv_path}`, 
+                    'success'
+                );
+                showResponse('bulk-response', data);
+                
+            } catch (error) {
+                showStatus('bulk-status', `Bulk analysis failed: ${error.message}`, 'error');
+            }
+        }
+        
+        async function downloadEvidence() {
+            showStatus('evidence-status', 'Generating evidence ZIP...', 'loading');
+            
+            try {
+                const response = await fetch(`${API_BASE}/evidence`);
+                if (!response.ok) {
+                    throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+                }
+                
+                const blob = await response.blob();
+                const url = window.URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = `geogov-evidence-${new Date().toISOString().split('T')[0]}.zip`;
+                document.body.appendChild(a);
+                a.click();
+                document.body.removeChild(a);
+                window.URL.revokeObjectURL(url);
+                
+                showStatus('evidence-status', 'Evidence ZIP downloaded successfully!', 'success');
+                
+            } catch (error) {
+                showStatus('evidence-status', `Evidence download failed: ${error.message}`, 'error');
+            }
+        }
+        
+        // Auto-check health on page load
+        window.onload = function() {
+            checkHealth();
+        };
+    </script>
+</body>
+</html>

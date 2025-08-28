@@ -24,6 +24,7 @@ import pandas as pd
 import yaml
 from fastapi import FastAPI, HTTPException, BackgroundTasks
 from fastapi.responses import Response
+from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field, validator
 from pydantic_settings import BaseSettings
 from tenacity import retry, stop_after_attempt, wait_exponential
@@ -147,6 +148,15 @@ class Chunk(BaseModel):
 
 # Global state
 app = FastAPI(title="GeoGov Lite", version="1.0.0")
+
+# Add CORS middleware to handle browser requests from file:// or different origins
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],  # Allow all origins for development
+    allow_credentials=True,
+    allow_methods=["*"],  # Allow all methods (GET, POST, OPTIONS, etc.)
+    allow_headers=["*"],  # Allow all headers
+)
 
 # Utility Functions
 def get_utc_timestamp() -> str:
@@ -1215,8 +1225,15 @@ async def get_rag_status():
 # Initialize with some sample data
 @app.on_event("startup")
 async def startup_event():
-    # Initialize with mock corpus
-    await refresh_corpus()
+    # Just initialize the systems without auto-processing
+    print("🚀 FastAPI server started - ready to process requests")
+    print("📡 Available endpoints:")
+    print("   • GET  /api/health - System health check")
+    print("   • POST /api/analyze - Single feature analysis")
+    print("   • POST /api/bulk_analyze - Bulk feature analysis")
+    print("   • GET  /api/evidence - Download evidence ZIP")
+    print("   • POST /api/refresh_corpus - Refresh knowledge base")
+    print("💡 Use the HTML frontend or call APIs directly")
 
 if __name__ == "__main__":
     import uvicorn
