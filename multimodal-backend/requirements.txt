@@ -1,0 +1,39 @@
+# FastAPI and web server
+fastapi>=0.104.0
+uvicorn[standard]>=0.24.0
+python-multipart>=0.0.6
+
+# CrewAI and AI agents
+crewai>=0.41.0
+crewai-tools>=0.4.0
+
+# OpenAI and multimodal AI
+openai>=1.40.0
+anthropic>=0.35.0
+
+# Document processing
+PyPDF2>=3.0.0
+python-docx>=1.1.0
+openpyxl>=3.1.0
+Pillow>=10.0.0
+
+# Image processing and computer vision
+opencv-python-headless>=4.8.0
+pytesseract>=0.3.10
+
+# Data processing
+pandas>=2.1.0
+numpy>=1.24.0
+
+# Async and HTTP
+httpx>=0.25.0
+aiofiles>=23.0.0
+
+# Environment and configuration
+python-dotenv>=1.0.0
+pydantic>=2.6.0
+pydantic-settings>=2.1.0
+
+# Utilities
+python-magic>=0.4.27
+tenacity>=8.2.0

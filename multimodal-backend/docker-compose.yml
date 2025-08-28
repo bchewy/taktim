@@ -1,0 +1,48 @@
+version: '3.8'
+
+services:
+  multimodal-backend:
+    build: .
+    ports:
+      - "8001:8001"
+    environment:
+      # API Keys - set these in your .env file or environment
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
+      
+      # CrewAI Configuration
+      - CREWAI_TELEMETRY_OPT_OUT=true
+      
+      # System Configuration
+      - PYTHONPATH=/app
+      - PYTHONUNBUFFERED=1
+      
+    volumes:
+      # Mount upload directory for persistent file storage
+      - ./uploads:/app/uploads
+      - ./results:/app/results
+      
+      # Mount source code for development (comment out for production)
+      - ./src:/app/src
+      - ./main.py:/app/main.py
+      
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8001/api/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+      
+    restart: unless-stopped
+    
+    # Resource limits
+    deploy:
+      resources:
+        limits:
+          memory: 4G
+        reservations:
+          memory: 2G
+
+volumes:
+  uploads_volume:
+  results_volume:
