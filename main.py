@@ -341,261 +341,63 @@ class LLMClient:
             raise
     
     async def finder(self, artifact: FeatureArtifact, chunks: List[Chunk]) -> FinderOut:
-        """Find compliance signals and regulations using GPT-4"""
+        """Find compliance signals and regulations using LangChain RAG"""
         
-        # Prepare context from retrieved chunks (reduced for token limits)
-        context = "\n\n".join([
-            f"Source: {chunk.metadata.get('source', 'unknown')}\n"
-            f"Content: {chunk.content[:500]}...\n"  # Truncate each chunk to 500 chars
-            f"Metadata: {chunk.metadata}"
-            for chunk in chunks[:5]  # Limit to top 5 chunks to stay within token limits
-        ])
+        # Use LangChain RAG for comprehensive analysis
+        result = await rag_system.langchain_rag.compliance_finder(
+            artifact.title, artifact.description, artifact.docs,
+            artifact.code_hints, artifact.tags
+        )
         
-        messages = [
-            {
-                "role": "system",
-                "content": "You are a legal compliance expert analyzing software features for geographical regulatory compliance. Your job is to find compliance signals and identify relevant regulations based on legal documents provided as context."
-            },
-            {
-                "role": "user", 
-                "content": f"""Analyze this software feature for geographical compliance requirements:
-
-**Feature:** {artifact.title}
-**Description:** {artifact.description}
-**Documentation:** {' '.join(artifact.docs)}
-**Code Hints:** {' '.join(artifact.code_hints)}
-**Tags:** {', '.join(artifact.tags)}
-
-**Legal Context:**
-{context}
-
-Based on the legal context provided, identify:
-1. Compliance signals (keywords/concepts that suggest regulatory requirements)
-2. Specific regulations that may apply
-3. Why each regulation applies
-4. Citations to specific chunks that support your analysis
-
-Return your analysis as JSON with this structure:
-{{
-  "signals": ["list of compliance signals found"],
-  "claims": [
-    {{
-      "regulation": "regulation name", 
-      "why": "explanation why this regulation applies",
-      "citations": ["chunk reference"]
-    }}
-  ],
-  "citations": ["list of all chunk references used"]
-}}"""
-            }
-        ]
-        
-        try:
-            response = await self.call_openai(messages)
-            content = response["choices"][0]["message"]["content"]
-            
-            # Debug: print the raw response
-            print(f"🔍 Finder raw response: {content[:200]}...")
-            
-            if not content or content.strip() == "":
-                print("⚠️  Empty response from LLM")
-                return FinderOut(signals=[], claims=[], citations=[])
-            
-            result = json.loads(content)
-            
-            return FinderOut(
-                signals=result.get("signals", []),
-                claims=result.get("claims", []),
-                citations=result.get("citations", [])
-            )
-        except json.JSONDecodeError as e:
-            print(f"Finder JSON decode error: {e}")
-            print(f"Raw response: {content}")
-            return FinderOut(signals=[], claims=[], citations=[])
-        except Exception as e:
-            print(f"Finder LLM call failed: {e}")
-            return FinderOut(signals=[], claims=[], citations=[])
+        # Convert LangChain RAG result to FinderOut format
+        return FinderOut(
+            signals=result.get("signals", []),
+            claims=result.get("claims", []),
+            citations=result.get("citations", [])
+        )
     
     async def counter(self, artifact: FeatureArtifact, chunks: List[Chunk]) -> CounterOut:
-        """Find counter-arguments and missing signals using GPT-4"""
+        """Find counter-arguments and missing signals using LangChain RAG"""
         
-        context = "\n\n".join([
-            f"Source: {chunk.metadata.get('source', 'unknown')}\n"
-            f"Content: {chunk.content[:500]}...\n"  # Truncate each chunk to 500 chars
-            f"Metadata: {chunk.metadata}"
-            for chunk in chunks[:5]  # Limit to top 5 chunks to stay within token limits
-        ])
+        # Use LangChain RAG for comprehensive counter-analysis
+        result = await rag_system.langchain_rag.compliance_counter(
+            artifact.title, artifact.description, artifact.docs,
+            artifact.code_hints, artifact.tags
+        )
         
-        messages = [
-            {
-                "role": "system",
-                "content": "You are a legal compliance expert. Your job is to find counter-arguments and identify missing compliance signals that might suggest a feature does NOT require geographical regulatory compliance."
-            },
-            {
-                "role": "user",
-                "content": f"""Analyze this software feature for potential exemptions or counter-arguments to geographical compliance:
-
-**Feature:** {artifact.title}
-**Description:** {artifact.description}
-**Documentation:** {' '.join(artifact.docs)}
-**Code Hints:** {' '.join(artifact.code_hints)}
-**Tags:** {', '.join(artifact.tags)}
-
-**Legal Context:**
-{context}
-
-Find counter-arguments and missing signals that might suggest this feature does NOT require geographical compliance:
-1. Counter-points (arguments against compliance requirements)
-2. Missing signals (compliance indicators that are notably absent)
-3. Citations supporting your counter-analysis
-
-Return as JSON:
-{{
-  "counter_points": ["list of arguments against compliance requirements"],
-  "missing_signals": ["list of compliance signals that are notably missing"],
-  "citations": ["list of chunk references"]
-}}"""
-            }
-        ]
-        
-        try:
-            response = await self.call_openai(messages)
-            content = response["choices"][0]["message"]["content"]
-            
-            # Debug: print the raw response
-            print(f"🔄 Counter raw response: {content[:200]}...")
-            
-            if not content or content.strip() == "":
-                print("⚠️  Empty response from Counter LLM")
-                return CounterOut(counter_points=[], missing_signals=[], citations=[])
-            
-            result = json.loads(content)
-            
-            return CounterOut(
-                counter_points=result.get("counter_points", []),
-                missing_signals=result.get("missing_signals", []),
-                citations=result.get("citations", [])
-            )
-        except json.JSONDecodeError as e:
-            print(f"Counter JSON decode error: {e}")
-            print(f"Raw response: {content}")
-            return CounterOut(counter_points=[], missing_signals=[], citations=[])
-        except Exception as e:
-            print(f"Counter LLM call failed: {e}")
-            return CounterOut(counter_points=[], missing_signals=[], citations=[])
+        # Convert LangChain RAG result to CounterOut format
+        return CounterOut(
+            counter_points=result.get("counter_points", []),
+            missing_signals=result.get("missing_signals", []),
+            citations=result.get("citations", [])
+        )
     
     async def judge(self, artifact: FeatureArtifact, finder_out: FinderOut, counter_out: CounterOut, make_decision: bool = False) -> JudgeOut:
-        """Make final compliance decision using GPT-4"""
+        """Make final compliance decision using LangChain RAG"""
         
-        if make_decision:
-            # LLM makes the final decision
-            system_msg = "You are a senior legal compliance expert making final decisions on whether software features require geographical regulatory compliance. You must weigh evidence for and against compliance requirements."
-            instructions = """**Instructions:**
-1. Synthesize all evidence for and against
-2. Make a final determination on compliance requirements  
-3. Assign a confidence score (0.0-1.0)
-4. Combine all relevant signals found
-5. Provide clear reasoning
-
-Return as JSON:
-{{
-  "signals": ["combined list of all relevant signals"],
-  "notes": "detailed reasoning for your decision", 
-  "confidence": 0.85,
-  "requires_compliance": true
-}}"""
-        else:
-            # LLM only analyzes, doesn't decide (original PRD behavior)
-            system_msg = "You are a legal compliance expert. Merge findings from compliance analysis. Normalize signals and provide confidence, but do NOT make the final YES/NO decision - that will be handled by a separate rules engine."
-            instructions = """**Instructions:**
-1. Synthesize all evidence for and against
-2. Combine all relevant signals found
-3. Assign a confidence score (0.0-1.0) for the analysis quality
-4. Provide clear reasoning notes
-5. DO NOT make the final compliance decision
-
-Return as JSON:
-{{
-  "signals": ["combined list of all relevant signals"],
-  "notes": "detailed reasoning and analysis",
-  "confidence": 0.85
-}}"""
+        # Use LangChain RAG for comprehensive judge analysis
+        result = await rag_system.langchain_rag.compliance_judge(
+            artifact.title, artifact.description,
+            finder_out.signals, finder_out.claims,
+            counter_out.counter_points, counter_out.missing_signals,
+            make_decision=make_decision
+        )
         
-        messages = [
-            {
-                "role": "system",
-                "content": system_msg
-            },
-            {
-                "role": "user",
-                "content": f"""Analyze this software feature for geographical regulatory compliance:
-
-**Feature:** {artifact.title}
-**Description:** {artifact.description}
-
-**Evidence FOR compliance (from finder analysis):**
-- Signals found: {', '.join(finder_out.signals)}
-- Regulatory claims: {json.dumps(finder_out.claims, indent=2)}
-
-**Evidence AGAINST compliance (from counter analysis):**
-- Counter-points: {', '.join(counter_out.counter_points)}
-- Missing signals: {', '.join(counter_out.missing_signals)}
-
-{instructions}"""
-            }
-        ]
+        # Combine signals from finder and counter analysis as fallback
+        all_signals = list(set(finder_out.signals + counter_out.missing_signals))
         
-        try:
-            response = await self.call_openai(messages)
-            content = response["choices"][0]["message"]["content"]
-            
-            # Debug: print the raw response
-            print(f"⚖️  Judge raw response: {content[:200]}...")
-            
-            if not content or content.strip() == "":
-                print("⚠️  Empty response from Judge LLM")
-                all_signals = list(set(finder_out.signals + counter_out.missing_signals))
-                return JudgeOut(
-                    signals=all_signals,
-                    notes="Empty response from LLM",
-                    confidence=0.0
-                )
-            
-            result = json.loads(content)
-            
-            # Combine signals from finder and counter analysis
-            all_signals = list(set(finder_out.signals + counter_out.missing_signals))
-            
-            judge_out = JudgeOut(
-                signals=result.get("signals", all_signals),
-                notes=result.get("notes", "Analysis completed"),
-                confidence=result.get("confidence", 0.5)
-            )
-            
-            # If LLM is making decision, store it in the notes for later use
-            if make_decision and "requires_compliance" in result:
-                judge_out.llm_decision = result.get("requires_compliance", False)
-            
-            return judge_out
-            
-        except json.JSONDecodeError as e:
-            print(f"Judge JSON decode error: {e}")
-            print(f"Raw response: {content}")
-            all_signals = list(set(finder_out.signals + counter_out.missing_signals))
-            return JudgeOut(
-                signals=all_signals,
-                notes=f"JSON decode failed: {str(e)}",
-                confidence=0.0
-            )
-        except Exception as e:
-            print(f"Judge LLM call failed: {e}")
-            # Fallback logic
-            all_signals = list(set(finder_out.signals + counter_out.missing_signals))
-            return JudgeOut(
-                signals=all_signals,
-                notes=f"LLM analysis failed: {str(e)}",
-                confidence=0.0
-            )
+        # Create JudgeOut object
+        judge_out = JudgeOut(
+            signals=result.get("signals", all_signals),
+            notes=result.get("notes", "LangChain RAG analysis completed"),
+            confidence=result.get("confidence", 0.5)
+        )
+        
+        # If LLM is making decision, store it in the llm_decision field
+        if make_decision and "requires_compliance" in result:
+            judge_out.llm_decision = result.get("requires_compliance", False)
+        
+        return judge_out
 
 # Initialize LLM client
 llm_client = LLMClient()
@@ -1004,16 +806,18 @@ evidence_system = EvidenceSystem()
 
 # Core Analysis Function
 async def analyze(artifact: FeatureArtifact) -> Decision:
-    # Extract signals
+    # Extract signals using pattern matching
     sigs = signal_extractor.extract_signals(artifact)
     
-    # RAG retrieval
-    query = " ".join([artifact.title, artifact.description] + sigs.hints)
-    chunks = rag_system.retrieve(query, k=settings.rag_topk)
+    # Use LLMClient methods (which now use LangChain RAG internally)
+    print(f"🤖 Using LangChain RAG via LLMClient for compliance analysis of {artifact.feature_id}")
     
-    # LLM ensemble
-    finder_out = await llm_client.finder(artifact, chunks)
-    counter_out = await llm_client.counter(artifact, chunks)
+    # For backward compatibility, pass empty chunks since LLMClient now uses RAG internally
+    empty_chunks = []
+    
+    # Run LLM ensemble analysis (all using LangChain RAG internally)
+    finder_out = await llm_client.finder(artifact, empty_chunks)
+    counter_out = await llm_client.counter(artifact, empty_chunks)
     
     # Toggle: LLM vs Rules Engine decision
     use_llm_decision = not settings.use_rules_engine
@@ -1024,10 +828,10 @@ async def analyze(artifact: FeatureArtifact) -> Decision:
         # LLM makes the final decision
         needs_compliance = judge_out.llm_decision if judge_out.llm_decision is not None else False
         reasoning = judge_out.notes
-        regulations = []  # Extract from finder_out.claims if needed
-        matched_rules = ["LLM_DECISION"]
+        matched_rules = ["LANGCHAIN_RAG_DECISION"]
         
-        # Extract regulations from LLM claims
+        # Extract regulations from finder claims
+        regulations = []
         for claim in finder_out.claims:
             if isinstance(claim, dict) and "regulation" in claim:
                 regulations.append(claim["regulation"])
@@ -1041,15 +845,25 @@ async def analyze(artifact: FeatureArtifact) -> Decision:
         regulations = verdict.regulations
         matched_rules = verdict.matched_ids
     
-    # Create decision
+    # Combine all signals from pattern matching and LangChain RAG
     all_signals = list(set(sigs.to_list() + judge_out.signals))
+    
+    # Create citations from finder results
+    citations = []
+    for citation_ref in finder_out.citations[:3]:
+        citations.append(Citation(
+            source=citation_ref,
+            snippet="LangChain RAG retrieved document"
+        ))
+    
+    # Create decision
     decision = Decision(
         feature_id=artifact.feature_id,
         needs_geo_compliance=needs_compliance,
         reasoning=reasoning,
         regulations=regulations,
         signals=all_signals,
-        citations=rag_system.hydrate_citations(finder_out.citations[:3]),
+        citations=citations,
         confidence=judge_out.confidence,
         matched_rules=matched_rules,
         ts=get_utc_timestamp(),
