@@ -295,15 +295,20 @@ class LLMClient:
     async def call_openai(self, messages: List[Dict], model: str = None) -> Dict:
         """Call OpenAI API with retry logic"""
         try:
+            total_prompt_length = sum(len(str(msg)) for msg in messages)
             print(f"🤖 Calling OpenAI API with model: {model or self.model}")
             print(f"📝 Message count: {len(messages)}")
-            print(f"📏 Total prompt length: {sum(len(str(msg)) for msg in messages)} chars")
+            print(f"📏 Total prompt length: {total_prompt_length} chars (~{total_prompt_length//4} tokens)")
+            
+            # Warning if prompt is too long
+            if total_prompt_length > 20000:  # ~5k tokens
+                print(f"⚠️  Large prompt detected! May hit token limits.")
             
             response = await self.client.chat.completions.create(
                 model=model or self.model,
                 messages=messages,
                 # temperature=1.0,  # GPT-5 only supports default temperature (1.0)
-                max_completion_tokens=4000,  # Increased token limit for GPT-5
+                max_completion_tokens=8000,  # Further increased token limit for GPT-5
                 response_format={"type": "json_object"}  # Required for structured output
             )
             
@@ -328,12 +333,12 @@ class LLMClient:
     async def finder(self, artifact: FeatureArtifact, chunks: List[Chunk]) -> FinderOut:
         """Find compliance signals and regulations using GPT-4"""
         
-        # Prepare context from retrieved chunks
+        # Prepare context from retrieved chunks (reduced for token limits)
         context = "\n\n".join([
             f"Source: {chunk.metadata.get('source', 'unknown')}\n"
-            f"Content: {chunk.content}\n"
+            f"Content: {chunk.content[:500]}...\n"  # Truncate each chunk to 500 chars
             f"Metadata: {chunk.metadata}"
-            for chunk in chunks[:10]  # Limit to top 10 chunks to stay within token limits
+            for chunk in chunks[:5]  # Limit to top 5 chunks to stay within token limits
         ])
         
         messages = [
@@ -406,9 +411,9 @@ Return your analysis as JSON with this structure:
         
         context = "\n\n".join([
             f"Source: {chunk.metadata.get('source', 'unknown')}\n"
-            f"Content: {chunk.content}\n"
+            f"Content: {chunk.content[:500]}...\n"  # Truncate each chunk to 500 chars
             f"Metadata: {chunk.metadata}"
-            for chunk in chunks[:10]
+            for chunk in chunks[:5]  # Limit to top 5 chunks to stay within token limits
         ])
         
         messages = [
