@@ -9,7 +9,7 @@ import uuid
 from typing import Dict, List, Any, Optional
 from datetime import datetime
 from crewai import Agent, Task, Crew, Process
-from crewai.tools import tool
+from crewai_tools import BaseTool
 from langchain_openai import ChatOpenAI
 from pathlib import Path
 from dotenv import load_dotenv
@@ -23,81 +23,88 @@ import sys
 sys.path.append(str(Path(__file__).parent.parent))
 from utils.geo_regulatory_database import GeoRegulatoryDatabase, RiskLevel, ComplianceStatus, GeographicCompliance
 
-@tool("geo_compliance_mapping")
-def geo_compliance_mapping_tool(target_markets: str, feature_characteristics: str, feature_name: str = "Unknown Feature") -> str:
-    """Map TikTok features to jurisdiction-specific regulatory requirements.
+class GeoComplianceMappingTool(BaseTool):
+    """Tool for mapping features to geo-specific compliance requirements"""
+    
+    name: str = "geo_compliance_mapping"
+    description: str = """Map TikTok features to jurisdiction-specific regulatory requirements.
     Analyzes target markets and feature characteristics to identify applicable regulations
     in each geographic region. Provides detailed compliance requirements and risk assessment."""
     
-    geo_db = GeoRegulatoryDatabase()
+    def __init__(self):
+        super().__init__()
+        self.geo_db = GeoRegulatoryDatabase()
     
-    # Parse inputs
-    markets = [market.strip() for market in target_markets.split(",")]
-    characteristics = [char.strip() for char in feature_characteristics.split(",")]
-    
-    # Get applicable regulations
-    applicable_regs = geo_db.get_applicable_regulations(markets, characteristics)
-    
-    # Assess risk levels
-    risk_levels = geo_db.assess_compliance_risk(applicable_regs)
-    
-    # Generate requirements
-    requirements = geo_db.generate_compliance_requirements(applicable_regs)
-    
-    # Generate evidence citations
-    citations = geo_db.generate_evidence_citations(applicable_regs)
-    
-    # Format output for agent
-    output = []
-    output.append(f"# Geo-Regulatory Compliance Mapping for: {feature_name}")
-    output.append(f"Target Markets: {', '.join(markets)}")
-    output.append(f"Feature Characteristics: {', '.join(characteristics)}")
-    output.append(f"Analysis Timestamp: {datetime.utcnow().isoformat()}")
-    output.append("")
-    
-    if not applicable_regs:
-        output.append("## No Regulatory Requirements Found")
-        output.append("This feature does not trigger any jurisdiction-specific compliance requirements.")
-        return "\n".join(output)
-    
-    output.append("## Jurisdiction-Specific Compliance Analysis")
-    output.append("")
-    
-    for jurisdiction, regulations in applicable_regs.items():
-        risk_level = risk_levels.get(jurisdiction, RiskLevel.LOW)
+    def _run(self, target_markets: str, feature_characteristics: str, feature_name: str = "Unknown Feature") -> str:
+        """Execute geo-compliance mapping"""
         
-        output.append(f"### {jurisdiction}")
-        output.append(f"**Risk Level**: {risk_level.value.upper()}")
-        output.append(f"**Applicable Regulations**: {len(regulations)}")
+        # Parse inputs
+        markets = [market.strip() for market in target_markets.split(",")]
+        characteristics = [char.strip() for char in feature_characteristics.split(",")]
+        
+        # Get applicable regulations
+        applicable_regs = self.geo_db.get_applicable_regulations(markets, characteristics)
+        
+        # Assess risk levels
+        risk_levels = self.geo_db.assess_compliance_risk(applicable_regs)
+        
+        # Generate requirements
+        requirements = self.geo_db.generate_compliance_requirements(applicable_regs)
+        
+        # Generate evidence citations
+        citations = self.geo_db.generate_evidence_citations(applicable_regs)
+        
+        # Format output for agent
+        output = []
+        output.append(f"# Geo-Regulatory Compliance Mapping for: {feature_name}")
+        output.append(f"Target Markets: {', '.join(markets)}")
+        output.append(f"Feature Characteristics: {', '.join(characteristics)}")
+        output.append(f"Analysis Timestamp: {datetime.utcnow().isoformat()}")
         output.append("")
         
-        # List regulations
-        output.append("**Regulations:**")
-        for reg in regulations:
-            output.append(f"- {reg.regulation_name} ({reg.article_section})")
-            output.append(f"  - Enforcement: {reg.enforcement_authority}")
-            output.append(f"  - Penalties: {reg.penalties}")
+        if not applicable_regs:
+            output.append("## No Regulatory Requirements Found")
+            output.append("This feature does not trigger any jurisdiction-specific compliance requirements.")
+            return "\n".join(output)
+        
+        output.append("## Jurisdiction-Specific Compliance Analysis")
         output.append("")
         
-        # List requirements
-        if jurisdiction in requirements:
-            output.append("**Compliance Requirements:**")
-            for req in requirements[jurisdiction]:
-                output.append(f"- {req}")
+        for jurisdiction, regulations in applicable_regs.items():
+            risk_level = risk_levels.get(jurisdiction, RiskLevel.LOW)
+            
+            output.append(f"### {jurisdiction}")
+            output.append(f"**Risk Level**: {risk_level.value.upper()}")
+            output.append(f"**Applicable Regulations**: {len(regulations)}")
             output.append("")
+            
+            # List regulations
+            output.append("**Regulations:**")
+            for reg in regulations:
+                output.append(f"- {reg.regulation_name} ({reg.article_section})")
+                output.append(f"  - Enforcement: {reg.enforcement_authority}")
+                output.append(f"  - Penalties: {reg.penalties}")
+            output.append("")
+            
+            # List requirements
+            if jurisdiction in requirements:
+                output.append("**Compliance Requirements:**")
+                for req in requirements[jurisdiction]:
+                    output.append(f"- {req}")
+                output.append("")
+            
+            # List evidence citations
+            if jurisdiction in citations:
+                output.append("**Legal Citations for Audit Trail:**")
+                for citation in citations[jurisdiction]:
+                    output.append(f"- {citation}")
+                output.append("")
         
-        # List evidence citations
-        if jurisdiction in citations:
-            output.append("**Legal Citations for Audit Trail:**")
-            for citation in citations[jurisdiction]:
-                output.append(f"- {citation}")
-            output.append("")
-    
-    # Overall risk summary
-    max_risk = max(risk_levels.values(), key=lambda x: ["low", "medium", "high", "critical"].index(x.value))
-    output.append(f"## Overall Risk Assessment")
-    output.append(f"**Highest Risk Level**: {max_risk.value.upper()}")
-    output.append(f"**Total Jurisdictions Affected**: {len(applicable_regs)}")
+        # Overall risk summary
+        max_risk = max(risk_levels.values(), key=lambda x: ["low", "medium", "high", "critical"].index(x.value))
+        output.append(f"## Overall Risk Assessment")
+        output.append(f"**Highest Risk Level**: {max_risk.value.upper()}")
+        output.append(f"**Total Jurisdictions Affected**: {len(applicable_regs)}")
     output.append(f"**Audit Trail ID**: {str(uuid.uuid4())}")
     
     return "\n".join(output)

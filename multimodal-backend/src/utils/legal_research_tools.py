@@ -5,9 +5,10 @@ Provides real-time access to legal databases for the Legal Knowledge Agent
 
 import asyncio
 import json
+import os
 from typing import Dict, Any, Optional
-from crewai_tools import BaseTool
 from pydantic import BaseModel, Field
+from crewai.tools import tool
 from .legal_apis import LegalResearchAggregator
 
 class LegalResearchInput(BaseModel):
@@ -17,68 +18,56 @@ class LegalResearchInput(BaseModel):
     include_congressional: bool = Field(default=True, description="Include congressional bills")
     include_state: bool = Field(default=True, description="Include state laws")
 
-class LegalResearchTool(BaseTool):
-    """Tool for researching legal topics using government APIs"""
-    
-    name: str = "legal_research"
-    description: str = """Research legal topics using official government APIs. 
+@tool("legal_research")
+def legal_research_tool(topic: str, include_federal: bool = True, 
+                       include_congressional: bool = True, include_state: bool = True) -> str:
+    """Research legal topics using official government APIs. 
     Searches federal regulations (GovInfo), congressional bills (Congress.gov), 
     and curated state laws. Use this to get current, authoritative legal information 
     for compliance analysis."""
     
-    args_schema = LegalResearchInput
-    
-    def __init__(self, congress_api_key: Optional[str] = None):
-        super().__init__()
-        self.congress_api_key = congress_api_key
-        self.aggregator = None
-    
-    def _run(self, topic: str, include_federal: bool = True, 
-            include_congressional: bool = True, include_state: bool = True) -> str:
-        """Execute legal research synchronously"""
+    congress_api_key = os.getenv("CONGRESS_API_KEY")
+    try:
+        # Check if there's already a running event loop
         try:
-            # Check if there's already a running event loop
-            try:
-                loop = asyncio.get_running_loop()
-                # If there's a running loop, we need to run in a thread
-                import concurrent.futures
-                with concurrent.futures.ThreadPoolExecutor() as executor:
-                    future = executor.submit(
-                        asyncio.run, 
-                        self._async_run(topic, include_federal, include_congressional, include_state)
-                    )
-                    return future.result(timeout=60)
-            except RuntimeError:
-                # No running loop, safe to use asyncio.run
-                return asyncio.run(self._async_run(topic, include_federal, include_congressional, include_state))
-        except Exception as e:
-            return f"Legal research failed: {str(e)}"
-    
-    async def _async_run(self, topic: str, include_federal: bool = True,
-                        include_congressional: bool = True, include_state: bool = True) -> str:
-        """Execute legal research asynchronously"""
-        try:
-            # Initialize aggregator
-            if not self.aggregator:
-                self.aggregator = LegalResearchAggregator(self.congress_api_key)
-            
-            # Perform research
-            result = await self.aggregator.research_topic(topic)
-            
-            # Format results for the agent
-            formatted_result = self._format_research_results(result, include_federal, include_congressional, include_state)
-            
-            return formatted_result
-            
-        except Exception as e:
-            return f"Legal research error: {str(e)}"
-        finally:
-            if self.aggregator:
-                await self.aggregator.close()
-                self.aggregator = None
-    
-    def _format_research_results(self, result: Dict[str, Any], include_federal: bool,
-                                include_congressional: bool, include_state: bool) -> str:
+            loop = asyncio.get_running_loop()
+            # If there's a running loop, we need to run in a thread
+            import concurrent.futures
+            with concurrent.futures.ThreadPoolExecutor() as executor:
+                future = executor.submit(
+                    asyncio.run, 
+                    _async_legal_research(topic, include_federal, include_congressional, include_state, congress_api_key)
+                )
+                return future.result(timeout=60)
+        except RuntimeError:
+            # No running loop, safe to use asyncio.run
+            return asyncio.run(_async_legal_research(topic, include_federal, include_congressional, include_state, congress_api_key))
+    except Exception as e:
+        return f"Legal research failed: {str(e)}"
+
+async def _async_legal_research(topic: str, include_federal: bool, include_congressional: bool, include_state: bool, congress_api_key: str) -> str:
+    """Execute legal research asynchronously"""
+    aggregator = None
+    try:
+        # Initialize aggregator
+        aggregator = LegalResearchAggregator(congress_api_key)
+        
+        # Perform research
+        result = await aggregator.research_topic(topic)
+        
+        # Format results for the agent
+        formatted_result = _format_research_results(result, include_federal, include_congressional, include_state)
+        
+        return formatted_result
+        
+    except Exception as e:
+        return f"Legal research error: {str(e)}"
+    finally:
+        if aggregator:
+            await aggregator.close()
+
+def _format_research_results(result: Dict[str, Any], include_federal: bool,
+                            include_congressional: bool, include_state: bool) -> str:
         """Format research results for agent consumption"""
         output = []
         
@@ -158,59 +147,50 @@ class LegalResearchTool(BaseTool):
         return "\n".join(output)
 
 
-class SocialMediaComplianceResearchTool(BaseTool):
-    """Specialized tool for social media platform compliance research"""
-    
-    name: str = "social_media_compliance_research"
-    description: str = """Comprehensive legal research specifically for social media platform compliance. 
+@tool("social_media_compliance_research")
+def social_media_compliance_research_tool() -> str:
+    """Comprehensive legal research specifically for social media platform compliance. 
     Covers children's privacy, content moderation, algorithm transparency, and platform-specific 
     regulations across federal and state jurisdictions."""
     
-    def __init__(self, congress_api_key: Optional[str] = None):
-        super().__init__()
-        self.congress_api_key = congress_api_key
-        self.aggregator = None
-    
-    def _run(self) -> str:
-        """Execute social media compliance research synchronously"""
+    congress_api_key = os.getenv("CONGRESS_API_KEY")
+    try:
+        # Check if there's already a running event loop
         try:
-            # Check if there's already a running event loop
-            try:
-                loop = asyncio.get_running_loop()
-                # If there's a running loop, we need to run in a thread
-                import concurrent.futures
-                with concurrent.futures.ThreadPoolExecutor() as executor:
-                    future = executor.submit(asyncio.run, self._async_run())
-                    return future.result(timeout=120)  # Longer timeout for comprehensive research
-            except RuntimeError:
-                # No running loop, safe to use asyncio.run
-                return asyncio.run(self._async_run())
-        except Exception as e:
-            return f"Social media compliance research failed: {str(e)}"
-    
-    async def _async_run(self) -> str:
-        """Execute comprehensive social media compliance research"""
-        try:
-            # Initialize aggregator
-            if not self.aggregator:
-                self.aggregator = LegalResearchAggregator(self.congress_api_key)
-            
-            # Perform comprehensive research
-            result = await self.aggregator.research_social_media_compliance()
-            
-            # Format results
-            formatted_result = self._format_compliance_results(result)
-            
-            return formatted_result
-            
-        except Exception as e:
-            return f"Social media compliance research error: {str(e)}"
-        finally:
-            if self.aggregator:
-                await self.aggregator.close()
-                self.aggregator = None
-    
-    def _format_compliance_results(self, result: Dict[str, Any]) -> str:
+            loop = asyncio.get_running_loop()
+            # If there's a running loop, we need to run in a thread
+            import concurrent.futures
+            with concurrent.futures.ThreadPoolExecutor() as executor:
+                future = executor.submit(asyncio.run, _async_social_media_research(congress_api_key))
+                return future.result(timeout=120)  # Longer timeout for comprehensive research
+        except RuntimeError:
+            # No running loop, safe to use asyncio.run
+            return asyncio.run(_async_social_media_research(congress_api_key))
+    except Exception as e:
+        return f"Social media compliance research failed: {str(e)}"
+
+async def _async_social_media_research(congress_api_key: str) -> str:
+    """Execute comprehensive social media compliance research"""
+    aggregator = None
+    try:
+        # Initialize aggregator
+        aggregator = LegalResearchAggregator(congress_api_key)
+        
+        # Perform comprehensive research
+        result = await aggregator.research_social_media_compliance()
+        
+        # Format results
+        formatted_result = _format_compliance_results(result)
+        
+        return formatted_result
+        
+    except Exception as e:
+        return f"Social media compliance research error: {str(e)}"
+    finally:
+        if aggregator:
+            await aggregator.close()
+
+def _format_compliance_results(result: Dict[str, Any]) -> str:
         """Format comprehensive compliance research results"""
         output = []
         
@@ -259,26 +239,15 @@ class SocialMediaComplianceResearchTool(BaseTool):
         return "\n".join(output)
 
 
-class RegulationDetailsTool(BaseTool):
-    """Tool for getting detailed information about specific regulations"""
-    
-    name: str = "regulation_details"
-    description: str = """Get detailed information about a specific regulation or law. 
+@tool("regulation_details")
+def regulation_details_tool(topic: str) -> str:
+    """Get detailed information about a specific regulation or law. 
     Provide the regulation name or package ID to get comprehensive details including 
     full text, effective dates, penalties, and compliance requirements."""
+    # This would integrate with specific regulation detail APIs
+    # For now, return curated information about key regulations
     
-    args_schema = LegalResearchInput
-    
-    def __init__(self, congress_api_key: Optional[str] = None):
-        super().__init__()
-        self.congress_api_key = congress_api_key
-    
-    def _run(self, topic: str) -> str:
-        """Get detailed regulation information"""
-        # This would integrate with specific regulation detail APIs
-        # For now, return curated information about key regulations
-        
-        known_regulations = {
+    known_regulations = {
             "coppa": {
                 "full_name": "Children's Online Privacy Protection Act (COPPA)",
                 "authority": "Federal Trade Commission (FTC)",
@@ -314,14 +283,14 @@ class RegulationDetailsTool(BaseTool):
             }
         }
         
-        topic_lower = topic.lower()
-        for key, reg_data in known_regulations.items():
-            if key in topic_lower or any(word in topic_lower for word in key.split()):
-                return self._format_regulation_details(reg_data)
-        
-        return f"Detailed information not available for: {topic}. Try using the legal_research tool for general information."
+    topic_lower = topic.lower()
+    for key, reg_data in known_regulations.items():
+        if key in topic_lower or any(word in topic_lower for word in key.split()):
+            return _format_regulation_details(reg_data)
     
-    def _format_regulation_details(self, reg_data: Dict[str, Any]) -> str:
+    return f"Detailed information not available for: {topic}. Try using the legal_research tool for general information."
+
+def _format_regulation_details(reg_data: Dict[str, Any]) -> str:
         """Format detailed regulation information"""
         output = []
         
@@ -363,8 +332,13 @@ class RegulationDetailsTool(BaseTool):
 # Factory function to create all legal research tools
 def create_legal_research_tools(congress_api_key: Optional[str] = None):
     """Create all legal research tools for the CrewAI agent"""
+    import os
+    # Set environment variable if provided
+    if congress_api_key:
+        os.environ["CONGRESS_API_KEY"] = congress_api_key
+    
     return [
-        LegalResearchTool(congress_api_key),
-        SocialMediaComplianceResearchTool(congress_api_key),
-        RegulationDetailsTool(congress_api_key)
+        legal_research_tool,
+        social_media_compliance_research_tool,
+        regulation_details_tool
     ]

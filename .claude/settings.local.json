@@ -6,7 +6,8 @@
       "Bash(npx tailwindcss init:*)",
       "Bash(npm start)",
       "Bash(set PORT=3001)",
-      "Bash(npx:*)"
+      "Bash(npx:*)",
+      "Bash(python:*)"
     ],
     "deny": [],
     "ask": []
