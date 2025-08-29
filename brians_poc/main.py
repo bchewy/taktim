@@ -73,6 +73,8 @@ class Settings(BaseSettings):
     use_rules_engine: bool = False  # Toggle: True = rules engine decides, False = LLM decides (default)
     skip_indexing: bool = False  # Toggle: True = skip vector store indexing, False = index documents (default)
     skip_scraping: bool = False  # Toggle: True = skip scraping documents, False = scrape documents (default)
+    use_rag: bool = True  # Toggle: True = use RAG for analysis (slower), False = direct LLM calls (faster)
+    llm_timeout: int = 10  # Timeout for LLM API calls in seconds
     
     model_config = {"env_file": ".env", "extra": "ignore"}
 
@@ -213,7 +215,14 @@ class SignalExtractor:
         
         return signals
 
-signal_extractor = SignalExtractor()
+# Lazy initialization for signal extractor  
+_signal_extractor = None
+
+def get_signal_extractor():
+    global _signal_extractor
+    if _signal_extractor is None:
+        _signal_extractor = SignalExtractor()
+    return _signal_extractor
 
 # Rules Engine
 class RulesEngine:
@@ -290,7 +299,14 @@ class RulesEngine:
             reason="No compliance requirements detected"
         )
 
-rules_engine = RulesEngine()
+# Lazy initialization for rules engine
+_rules_engine = None
+
+def get_rules_engine():
+    global _rules_engine
+    if _rules_engine is None:
+        _rules_engine = RulesEngine()
+    return _rules_engine
 
 # Real OpenAI LLM Integration
 class LLMClient:
@@ -299,11 +315,14 @@ class LLMClient:
             raise ValueError("OPENAI_API_KEY is required for LLM integration")
         
         self.client = AsyncOpenAI(api_key=settings.openai_api_key)
-        self.model = "gpt-5-2025-08-07"  # Using GPT-5 for best compliance reasoning
+        self.model = "gpt-5-2025-08-07"  # Default model for RAG mode
+        self.direct_model = "gpt-4o-mini"  # Faster model for Direct mode
     
     @retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=4, max=10))
     async def call_openai(self, messages: List[Dict], model: str = None) -> Dict:
         """Call OpenAI API with retry logic"""
+        import asyncio
+        
         try:
             total_prompt_length = sum(len(str(msg)) for msg in messages)
             print(f"🤖 Calling OpenAI API with model: {model or self.model}")
@@ -314,12 +333,15 @@ class LLMClient:
             if total_prompt_length > 20000:  # ~5k tokens
                 print(f"⚠️  Large prompt detected! May hit token limits.")
             
-            response = await self.client.chat.completions.create(
-                model=model or self.model,
-                messages=messages,
-                # temperature=1.0,  # GPT-5 only supports default temperature (1.0)
-                max_completion_tokens=8000,  # Further increased token limit for GPT-5
-                response_format={"type": "json_object"}  # Required for structured output
+            response = await asyncio.wait_for(
+                self.client.chat.completions.create(
+                    model=model or self.model,
+                    messages=messages,
+                    # temperature=1.0,  # GPT-5 only supports default temperature (1.0)
+                    max_completion_tokens=8000  # Further increased token limit for GPT-5
+                    # Removed response_format as it causes GPT-5 to hang
+                ),
+                timeout=settings.llm_timeout
             )
             
             print(f"✅ OpenAI API response received")
@@ -336,71 +358,262 @@ class LLMClient:
                     }
                 }]
             }
+        except asyncio.TimeoutError:
+            print(f"⏱️ OpenAI API timeout after {settings.llm_timeout}s")
+            return {
+                "choices": [{
+                    "message": {
+                        "content": "TIMEOUT: Analysis timed out"
+                    }
+                }]
+            }
         except Exception as e:
-            print(f"OpenAI API error: {e}")
+            print(f"❌ OpenAI API error: {e}")
+            print(f"   Error type: {type(e).__name__}")
             raise
     
+    def _parse_finder_response(self, response: str) -> FinderOut:
+        """Parse natural language finder response"""
+        signals = []
+        claims = []
+        citations = []
+        
+        lines = response.split('\n')
+        current_section = None
+        
+        for line in lines:
+            line = line.strip()
+            if 'SIGNAL' in line.upper():
+                current_section = 'signals'
+            elif 'CLAIM' in line.upper():
+                current_section = 'claims'
+            elif 'CITATION' in line.upper():
+                current_section = 'citations'
+            elif line.startswith('-') or line.startswith('•'):
+                content = line.lstrip('-•').strip()
+                if content and current_section == 'signals':
+                    signals.append(content)
+                elif content and current_section == 'claims':
+                    claims.append({"claim": content, "regulation": content})
+                elif content and current_section == 'citations':
+                    citations.append(content)
+        
+        return FinderOut(signals=signals, claims=claims, citations=citations)
+    
+    def _parse_counter_response(self, response: str) -> CounterOut:
+        """Parse natural language counter response"""
+        counter_points = []
+        missing_signals = []
+        citations = []
+        
+        lines = response.split('\n')
+        current_section = None
+        
+        for line in lines:
+            line = line.strip()
+            if 'REASON' in line.upper() or 'COUNTER' in line.upper():
+                current_section = 'counter'
+            elif 'MISSING' in line.upper() or 'SIGNAL' in line.upper():
+                current_section = 'missing'
+            elif 'CITATION' in line.upper() or 'SOURCE' in line.upper():
+                current_section = 'citations'
+            elif line.startswith('-') or line.startswith('•'):
+                content = line.lstrip('-•').strip()
+                if content and current_section == 'counter':
+                    counter_points.append(content)
+                elif content and current_section == 'missing':
+                    missing_signals.append(content)
+                elif content and current_section == 'citations':
+                    citations.append(content)
+        
+        return CounterOut(counter_points=counter_points, missing_signals=missing_signals, citations=citations)
+    
+    def _parse_judge_response(self, response: str, make_decision: bool) -> JudgeOut:
+        """Parse natural language judge response"""
+        confidence = 0.5
+        decision = None
+        notes = ""
+        
+        lines = response.split('\n')
+        for line in lines:
+            line = line.strip()
+            if 'CONFIDENCE' in line.upper():
+                if 'HIGH' in line.upper():
+                    confidence = 0.9
+                elif 'MEDIUM' in line.upper():
+                    confidence = 0.6
+                elif 'LOW' in line.upper():
+                    confidence = 0.3
+            elif 'DECISION' in line.upper():
+                if 'YES' in line.upper():
+                    decision = True
+                elif 'NO' in line.upper():
+                    decision = False
+            elif 'REASON' in line.upper():
+                # Get everything after REASON:
+                parts = line.split(':', 1)
+                if len(parts) > 1:
+                    notes = parts[1].strip()
+        
+        return JudgeOut(
+            confidence=confidence,
+            notes=notes or response[:200],
+            llm_decision=decision if make_decision else None
+        )
+    
     async def finder(self, artifact: FeatureArtifact, chunks: List[Chunk]) -> FinderOut:
-        """Find compliance signals and regulations using LangChain RAG"""
+        """Find compliance signals and regulations"""
         
-        # Use LangChain RAG for comprehensive analysis
-        result = await rag_system.langchain_rag.compliance_finder(
-            artifact.title, artifact.description, artifact.docs,
-            artifact.code_hints, artifact.tags
-        )
-        
-        # Convert LangChain RAG result to FinderOut format
-        return FinderOut(
-            signals=result.get("signals", []),
-            claims=result.get("claims", []),
-            citations=result.get("citations", [])
-        )
+        if settings.use_rag:
+            # Use LangChain RAG for comprehensive analysis
+            rag = get_rag_system()
+            result = rag.langchain_rag.compliance_finder(
+                artifact.title, artifact.description, artifact.docs,
+                artifact.code_hints, artifact.tags
+            )
+            
+            # Convert LangChain RAG result to FinderOut format
+            return FinderOut(
+                signals=result.get("signals", []),
+                claims=result.get("claims", []),
+                citations=result.get("citations", [])
+            )
+        else:
+            # Direct LLM call without RAG (faster but less context-aware)
+            prompt = f"""Feature: {artifact.title}
+Description: {artifact.description}
+Tags: {', '.join(artifact.tags) if artifact.tags else 'none'}
+
+Does this feature need geographical compliance? List:
+- SIGNALS: Compliance indicators found
+- CLAIMS: Relevant regulations
+- CITATIONS: Sources"""
+            
+            messages = [{"role": "user", "content": prompt}]
+            # Use faster model for Direct mode
+            response = await self.call_openai(messages, model=self.direct_model)
+            
+            try:
+                content = response["choices"][0]["message"]["content"]
+                return self._parse_finder_response(content)
+            except (KeyError, Exception) as e:
+                print(f"Error parsing finder response: {e}")
+                return FinderOut(signals=[], claims=[], citations=[])
     
     async def counter(self, artifact: FeatureArtifact, chunks: List[Chunk]) -> CounterOut:
-        """Find counter-arguments and missing signals using LangChain RAG"""
+        """Find counter-arguments and missing signals"""
         
-        # Use LangChain RAG for comprehensive counter-analysis
-        result = await rag_system.langchain_rag.compliance_counter(
-            artifact.title, artifact.description, artifact.docs,
-            artifact.code_hints, artifact.tags
-        )
-        
-        # Convert LangChain RAG result to CounterOut format
-        return CounterOut(
-            counter_points=result.get("counter_points", []),
-            missing_signals=result.get("missing_signals", []),
-            citations=result.get("citations", [])
-        )
+        if settings.use_rag:
+            # Use LangChain RAG for comprehensive counter-analysis
+            rag = get_rag_system()
+            result = rag.langchain_rag.compliance_counter(
+                artifact.title, artifact.description, artifact.docs,
+                artifact.code_hints, artifact.tags
+            )
+            
+            # Convert LangChain RAG result to CounterOut format
+            return CounterOut(
+                counter_points=result.get("counter_points", []),
+                missing_signals=result.get("missing_signals", []),
+                citations=result.get("citations", [])
+            )
+        else:
+            # Direct LLM call without RAG
+            prompt = f"""Feature: {artifact.title}
+Description: {artifact.description}
+
+Why might this NOT need compliance? List:
+- COUNTER POINTS: Reasons compliance may not apply
+- MISSING SIGNALS: What indicators are absent
+- CITATIONS: Sources"""
+            
+            messages = [{"role": "user", "content": prompt}]
+            # Use faster model for Direct mode
+            response = await self.call_openai(messages, model=self.direct_model)
+            
+            try:
+                content = response["choices"][0]["message"]["content"]
+                return self._parse_counter_response(content)
+            except (KeyError, Exception) as e:
+                print(f"Error parsing counter response: {e}")
+                return CounterOut(counter_points=[], missing_signals=[], citations=[])
     
     async def judge(self, artifact: FeatureArtifact, finder_out: FinderOut, counter_out: CounterOut, make_decision: bool = False) -> JudgeOut:
-        """Make final compliance decision using LangChain RAG"""
+        """Make final compliance decision"""
         
-        # Use LangChain RAG for comprehensive judge analysis
-        result = await rag_system.langchain_rag.compliance_judge(
-            artifact.title, artifact.description,
-            finder_out.signals, finder_out.claims,
-            counter_out.counter_points, counter_out.missing_signals,
-            make_decision=make_decision
-        )
-        
-        # Combine signals from finder and counter analysis as fallback
-        all_signals = list(set(finder_out.signals + counter_out.missing_signals))
-        
-        # Create JudgeOut object
-        judge_out = JudgeOut(
-            signals=result.get("signals", all_signals),
-            notes=result.get("notes", "LangChain RAG analysis completed"),
-            confidence=result.get("confidence", 0.5)
-        )
-        
-        # If LLM is making decision, store it in the llm_decision field
-        if make_decision and "requires_compliance" in result:
-            judge_out.llm_decision = result.get("requires_compliance", False)
-        
-        return judge_out
+        if settings.use_rag:
+            # Use LangChain RAG for comprehensive judge analysis
+            rag = get_rag_system()
+            result = rag.langchain_rag.compliance_judge(
+                artifact.title, artifact.description,
+                finder_out.signals, finder_out.claims,
+                counter_out.counter_points, counter_out.missing_signals,
+                make_decision=make_decision
+            )
+            
+            # Combine signals from finder and counter analysis as fallback
+            all_signals = list(set(finder_out.signals + counter_out.missing_signals))
+            
+            # Create JudgeOut object
+            judge_out = JudgeOut(
+                signals=result.get("signals", all_signals),
+                notes=result.get("notes", "LangChain RAG analysis completed"),
+                confidence=result.get("confidence", 0.5)
+            )
+            
+            # If LLM is making decision, store it in the llm_decision field
+            if make_decision and "requires_compliance" in result:
+                judge_out.llm_decision = result.get("requires_compliance", False)
+            
+            return judge_out
+        else:
+            # Direct LLM call without RAG
+            all_signals = list(set(finder_out.signals + counter_out.missing_signals))
+            
+            prompt = f"""Feature: {artifact.title}
+FOR compliance: {', '.join(finder_out.signals[:3]) if finder_out.signals else 'none'}
+AGAINST compliance: {', '.join(counter_out.counter_points[:3]) if counter_out.counter_points else 'none'}
 
-# Initialize LLM client
-llm_client = LLMClient()
+Does this need compliance? Answer:
+- CONFIDENCE: High/Medium/Low
+- DECISION: Yes/No
+- REASON: Brief explanation"""
+            
+            messages = [{"role": "user", "content": prompt}]
+            # Use faster model for Direct mode
+            response = await self.call_openai(messages, model=self.direct_model)
+            
+            try:
+                content = response["choices"][0]["message"]["content"]
+                parsed = self._parse_judge_response(content, make_decision)
+                
+                judge_out = JudgeOut(
+                    signals=all_signals,
+                    notes=parsed.notes,
+                    confidence=parsed.confidence
+                )
+                
+                if make_decision:
+                    judge_out.llm_decision = parsed.llm_decision
+                
+                return judge_out
+            except (KeyError, Exception) as e:
+                print(f"Error parsing judge response: {e}")
+                return JudgeOut(
+                    signals=all_signals,
+                    notes="Analysis completed",
+                    confidence=0.5,
+                    llm_decision=False if make_decision else None
+                )
+
+# Lazy initialization for LLM client
+_llm_client = None
+
+def get_llm_client():
+    global _llm_client
+    if _llm_client is None:
+        _llm_client = LLMClient()
+    return _llm_client
 
 # LangChain RAG System Only
 class RAGSystem:
@@ -664,7 +877,8 @@ class ScrapingAggregator:
             
             try:
                 # Use LangChain RAG to find URLs, scrape, and index documents
-                indexed_count = await rag_system.langchain_rag.index_regulation_from_search_apis(
+                rag = get_rag_system()
+                indexed_count = await rag.langchain_rag.index_regulation_from_search_apis(
                     name, jurisdiction, self.perplexity_client, self.exa_client, force_refresh=force_refresh, skip_indexing=settings.skip_indexing
                 )
                 sources_count[f"{name}_{jurisdiction}"] = indexed_count
@@ -702,7 +916,7 @@ class ScrapingAggregator:
         
         # Index all documents into the RAG system
         if all_docs:
-            indexed_count = rag_system.index_documents(all_docs)
+            indexed_count = get_rag_system().index_documents(all_docs)
             print(f"\n📚 Successfully indexed {indexed_count} documents from {len(sources_count)} regulations")
         
         return {
@@ -719,9 +933,25 @@ class ScrapingAggregator:
         if self.exa_client and hasattr(self.exa_client, 'close'):
             await self.exa_client.close()
 
-# Initialize systems
-rag_system = RAGSystem()
-scraping_aggregator = ScrapingAggregator()
+# Lazy initialization for systems
+_rag_system = None
+_scraping_aggregator = None
+
+def get_rag_system():
+    global _rag_system
+    if _rag_system is None:
+        print("🔄 Initializing RAG system (lazy load)...")
+        _rag_system = RAGSystem()
+        print("✅ RAG system initialized")
+    return _rag_system
+
+def get_scraping_aggregator():
+    global _scraping_aggregator
+    if _scraping_aggregator is None:
+        print("🔄 Initializing scraping aggregator (lazy load)...")
+        _scraping_aggregator = ScrapingAggregator()
+        print("✅ Scraping aggregator initialized")
+    return _scraping_aggregator
 
 # Evidence System
 class EvidenceSystem:
@@ -802,20 +1032,29 @@ class EvidenceSystem:
         
         return zip_buffer.getvalue()
 
-evidence_system = EvidenceSystem()
+# Lazy initialization for evidence system
+_evidence_system = None
+
+def get_evidence_system():
+    global _evidence_system
+    if _evidence_system is None:
+        _evidence_system = EvidenceSystem()
+    return _evidence_system
 
 # Core Analysis Function
 async def analyze(artifact: FeatureArtifact) -> Decision:
     # Extract signals using pattern matching
-    sigs = signal_extractor.extract_signals(artifact)
+    sigs = get_signal_extractor().extract_signals(artifact)
     
-    # Use LLMClient methods (which now use LangChain RAG internally)
-    print(f"🤖 Using LangChain RAG via LLMClient for compliance analysis of {artifact.feature_id}")
+    # Log which mode we're using
+    mode = "LangChain RAG" if settings.use_rag else "Direct LLM"
+    print(f"🤖 Using {mode} for compliance analysis of {artifact.feature_id}")
     
     # For backward compatibility, pass empty chunks since LLMClient now uses RAG internally
     empty_chunks = []
     
-    # Run LLM ensemble analysis (all using LangChain RAG internally)
+    # Run LLM ensemble analysis
+    llm_client = get_llm_client()
     finder_out = await llm_client.finder(artifact, empty_chunks)
     counter_out = await llm_client.counter(artifact, empty_chunks)
     
@@ -839,7 +1078,7 @@ async def analyze(artifact: FeatureArtifact) -> Decision:
     else:
         # Rules engine makes the final decision (original behavior)
         text = f"{artifact.title} {artifact.description}"
-        verdict = rules_engine.evaluate(sigs, text)
+        verdict = get_rules_engine().evaluate(sigs, text)
         needs_compliance = verdict.ok
         reasoning = verdict.reason
         regulations = verdict.regulations
@@ -871,7 +1110,7 @@ async def analyze(artifact: FeatureArtifact) -> Decision:
     )
     
     # Write receipt and set hash
-    decision.hash = evidence_system.write_receipt(decision)
+    decision.hash = get_evidence_system().write_receipt(decision)
     
     return decision
 
@@ -888,15 +1127,82 @@ async def health():
     return {
         "ok": True,
         "rules_hash": rules_hash,
-        "mem0_docs": len(rag_system.chunks),
+        "mem0_docs": len(get_rag_system().chunks),
         "policy_version": settings.policy_version
+    }
+
+@app.get("/api/rag_status")
+async def get_rag_status():
+    """Get current RAG toggle status"""
+    return {
+        "use_rag": settings.use_rag,
+        "description": "RAG (Retrieval-Augmented Generation) is currently " + ("enabled" if settings.use_rag else "disabled")
+    }
+
+@app.post("/api/test_llm")
+async def test_llm():
+    """Test direct LLM call with simple prompt"""
+    from openai import AsyncOpenAI
+    import asyncio
+    
+    client = AsyncOpenAI(api_key=settings.openai_api_key)
+    
+    try:
+        print("🧪 Testing direct LLM call...")
+        response = await asyncio.wait_for(
+            client.chat.completions.create(
+                model="gpt-5-2025-08-07",
+                messages=[{"role": "user", "content": "Say 'Hello'"}],
+                max_completion_tokens=10
+            ),
+            timeout=5
+        )
+        
+        content = response.choices[0].message.content
+        print(f"✅ LLM responded: {content}")
+        return {"success": True, "response": content}
+    except asyncio.TimeoutError:
+        print("⏱️ LLM timeout")
+        return {"success": False, "error": "Timeout after 5 seconds"}
+    except Exception as e:
+        print(f"❌ LLM error: {e}")
+        return {"success": False, "error": str(e)}
+
+@app.post("/api/toggle_rag")
+async def toggle_rag(enable: bool = None):
+    """Toggle RAG on or off, or explicitly set it"""
+    if enable is None:
+        settings.use_rag = not settings.use_rag
+    else:
+        settings.use_rag = enable
+    
+    status = "enabled" if settings.use_rag else "disabled"
+    print(f"🔄 RAG has been {status}")
+    
+    return {
+        "use_rag": settings.use_rag,
+        "message": f"RAG has been {status}. This will affect all subsequent analyze calls."
     }
 
 @app.post("/api/analyze")
 async def analyze_endpoint(artifact: FeatureArtifact) -> Decision:
+    import time
+    start_time = time.time()
+    
     try:
-        return await analyze(artifact)
+        mode = "RAG" if settings.use_rag else "Direct"
+        print(f"🔍 Starting {mode} analysis for feature: {artifact.feature_id}")
+        result = await analyze(artifact)
+        
+        end_time = time.time()
+        duration = end_time - start_time
+        print(f"✅ {mode} analysis completed for {artifact.feature_id} in {duration:.2f} seconds")
+        
+        return result
     except Exception as e:
+        end_time = time.time()
+        duration = end_time - start_time
+        print(f"❌ Analysis failed for {artifact.feature_id} after {duration:.2f} seconds: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.post("/api/bulk_analyze")
@@ -915,7 +1221,7 @@ async def bulk_analyze(request: Dict[str, List[FeatureArtifact]]):
             continue
     
     # Export to CSV
-    csv_path = evidence_system.export_csv(decisions)
+    csv_path = get_evidence_system().export_csv(decisions)
     
     return {
         "count": len(decisions),
@@ -925,7 +1231,7 @@ async def bulk_analyze(request: Dict[str, List[FeatureArtifact]]):
 @app.get("/api/evidence")
 async def get_evidence(feature_id: Optional[str] = None):
     try:
-        zip_data = evidence_system.make_evidence_zip(feature_id)
+        zip_data = get_evidence_system().make_evidence_zip(feature_id)
         return Response(
             content=zip_data,
             media_type="application/zip",
@@ -948,7 +1254,8 @@ async def refresh_corpus():
             return await refresh_corpus_fallback()
         
         # Use the scraping aggregator to research all regulations
-        result = await scraping_aggregator.refresh_corpus_for_regulations(regulations)
+        scraping = get_scraping_aggregator()
+        result = await scraping.refresh_corpus_for_regulations(regulations)
         
         return result
         
@@ -964,49 +1271,49 @@ async def refresh_corpus_fallback():
             url="https://eur-lex.europa.eu/legal-content/EN/TXT/?uri=CELEX%3A32022R2065",
             content="""EU Digital Services Act (DSA) Article 38 - Recommender Systems Transparency:
 
-1. Recipients of the service shall be able to easily understand when information is being prioritised based on profiling as defined in Article 4(4) of Regulation (EU) 2016/679.
+            1. Recipients of the service shall be able to easily understand when information is being prioritised based on profiling as defined in Article 4(4) of Regulation (EU) 2016/679.
 
-2. For each of their recommender systems, providers of online platforms shall set out in their terms and conditions, in plain and intelligible language:
-   (a) the main parameters used in their recommender systems, as well as any options for the recipients of the service to modify or influence those main parameters, including at least one option which is not based on profiling;
-   (b) how to access and use the options referred to in point (a).
+            2. For each of their recommender systems, providers of online platforms shall set out in their terms and conditions, in plain and intelligible language:
+            (a) the main parameters used in their recommender systems, as well as any options for the recipients of the service to modify or influence those main parameters, including at least one option which is not based on profiling;
+            (b) how to access and use the options referred to in point (a).
 
-3. Providers of online platforms shall provide recipients of their service with at least one option for each of their recommender systems that is not based on profiling. That option shall be prominently displayed and easily accessible.
+            3. Providers of online platforms shall provide recipients of their service with at least one option for each of their recommender systems that is not based on profiling. That option shall be prominently displayed and easily accessible.
 
-4. Very large online platforms shall provide recipients with easily accessible functionality that allows them to view content that is not recommended on the basis of profiling or categorisation of the recipient.
+            4. Very large online platforms shall provide recipients with easily accessible functionality that allows them to view content that is not recommended on the basis of profiling or categorisation of the recipient.
 
-Article 39 - Risk Assessment:
-Very large online platforms shall diligently identify, analyse and assess any systemic risks in the Union stemming from the design or functioning of their service and its related systems, including algorithmic systems, or from the use made of their service. Those assessments shall include the following systemic risks:
-(a) the dissemination of illegal content;
-(b) any actual or foreseeable negative effects for the exercise of fundamental rights;
-(c) intentional manipulation of their service, including by means of inauthentic use or automated exploitation of the service.""",
+            Article 39 - Risk Assessment:
+            Very large online platforms shall diligently identify, analyse and assess any systemic risks in the Union stemming from the design or functioning of their service and its related systems, including algorithmic systems, or from the use made of their service. Those assessments shall include the following systemic risks:
+            (a) the dissemination of illegal content;
+            (b) any actual or foreseeable negative effects for the exercise of fundamental rights;
+            (c) intentional manipulation of their service, including by means of inauthentic use or automated exploitation of the service.""",
             title="EU Digital Services Act - Recommender Systems & Risk Assessment",
             metadata={"jurisdiction": "EU", "topic": "recommender_systems", "compliance_areas": "profiling,transparency,risk_assessment"}
         ),
         RawDoc(
             url="https://leginfo.legislature.ca.gov/faces/billTextClient.xhtml?bill_id=202320240SB976",
             content="""California SB976 - Social Media Platforms: Children
-SEC. 2. Chapter 22.1 (commencing with Section 22675) is added to Division 8 of the Business and Professions Code, to read:
+            SEC. 2. Chapter 22.1 (commencing with Section 22675) is added to Division 8 of the Business and Professions Code, to read:
 
-22675. For purposes of this chapter:
-(a) "Child" means a natural person under 18 years of age.
-(b) "Social media platform" means an internet website or application that is primarily used for social networking and allows users to view and post content, communicate with other users, and join communities.
+            22675. For purposes of this chapter:
+            (a) "Child" means a natural person under 18 years of age.
+            (b) "Social media platform" means an internet website or application that is primarily used for social networking and allows users to view and post content, communicate with other users, and join communities.
 
-22676. (a) A social media platform shall not use the personal information of a child to provide advertising that is targeted to that child.
-(b) A social media platform shall not use any system design feature that the platform knows, or should know, causes or is reasonably likely to cause addiction-like behavior by children on the platform.
+            22676. (a) A social media platform shall not use the personal information of a child to provide advertising that is targeted to that child.
+            (b) A social media platform shall not use any system design feature that the platform knows, or should know, causes or is reasonably likely to cause addiction-like behavior by children on the platform.
 
-22677. (a) A social media platform shall provide, by default, the highest privacy settings for child users and shall require affirmative consent before reducing those privacy protections.
-(b) A social media platform shall not send notifications to a child between the hours of 12 a.m. and 6 a.m. or during school hours, unless there is an imminent threat to the child's physical safety.
+            22677. (a) A social media platform shall provide, by default, the highest privacy settings for child users and shall require affirmative consent before reducing those privacy protections.
+            (b) A social media platform shall not send notifications to a child between the hours of 12 a.m. and 6 a.m. or during school hours, unless there is an imminent threat to the child's physical safety.
 
-22678. Enforcement and Civil Penalties:
-(a) A violation of this chapter constitutes an unlawful business practice under Section 17200.
-(b) The Attorney General may seek civil penalties up to $25,000 per affected child for each violation.
-(c) A child or parent may bring a civil action for violations, seeking actual damages or $1,000, whichever is greater.""",
+            22678. Enforcement and Civil Penalties:
+            (a) A violation of this chapter constitutes an unlawful business practice under Section 17200.
+            (b) The Attorney General may seek civil penalties up to $25,000 per affected child for each violation.
+            (c) A child or parent may bring a civil action for violations, seeking actual damages or $1,000, whichever is greater.""",
             title="California SB976 - Social Media Child Protection",
             metadata={"jurisdiction": "CA", "topic": "minors_protection", "compliance_areas": "targeted_advertising,privacy,parental_controls,penalties"}
         )
     ]
     
-    indexed_count = rag_system.index_documents(mock_docs)
+    indexed_count = get_rag_system().index_documents(mock_docs)
     
     return {
         "ingested": indexed_count,
@@ -1024,9 +1331,9 @@ async def get_rag_status():
         return {
             "system": "langchain",
             "langchain_initialized": True,
-            "chunks_available": len(rag_system.chunks),
-            "vectorstore_available": rag_system.langchain_rag.vectorstore is not None,
-            "rag_chain_available": rag_system.langchain_rag.rag_chain is not None
+            "chunks_available": len(get_rag_system().chunks),
+            "vectorstore_available": get_rag_system().langchain_rag.vectorstore is not None,
+            "rag_chain_available": get_rag_system().langchain_rag.rag_chain is not None
         }
         
     except Exception as e:
