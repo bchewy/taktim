@@ -293,9 +293,6 @@ class MultimodalCrew:
             - Name: {feature_data.get('feature_name', 'Unknown Feature')}
             - Description: {feature_data.get('description', 'No description provided')}
             - Target Markets: {', '.join(feature_data.get('target_markets', []))}
-            - Data Collected: {', '.join(feature_data.get('data_collected', []))}
-            - User Demographics: {', '.join(feature_data.get('user_demographics', []))}
-            - AI Components: {', '.join(feature_data.get('ai_components', []))}
             
             **MANDATORY RESEARCH STEPS (You MUST use your legal research tools):**
             

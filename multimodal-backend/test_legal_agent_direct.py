@@ -28,10 +28,7 @@ except ImportError as e:
 TEST_FEATURE = {
     "feature_name": "Teen Dance Challenge Generator",
     "description": "AI-powered dance challenges for teenagers with social sharing",
-    "target_markets": ["US", "EU"],
-    "data_collected": ["video_uploads", "biometric_movement", "user_preferences"],
-    "user_demographics": ["13-17", "dance_enthusiasts"],
-    "ai_components": ["computer_vision", "recommendation_engine", "movement_analysis"]
+    "target_markets": ["US", "EU"]
 }
 
 async def test_direct_api_calls():
@@ -121,14 +118,14 @@ def simulate_legal_analysis():
     
     feature = TEST_FEATURE
     print(f"\nAnalyzing feature: {feature['feature_name']}")
-    print(f"Target demographics: {', '.join(feature['user_demographics'])}")
-    print(f"Data collected: {', '.join(feature['data_collected'])}")
+    print(f"Description: {feature['description']}")
+    print(f"Target markets: {', '.join(feature['target_markets'])}")
     
     # Simulate legal analysis based on government data access
     print(f"\n[LEGAL ANALYSIS SIMULATION]")
-    print(f"1. Feature involves teens (13-17) -> COPPA compliance required")
-    print(f"2. AI recommendation engine -> Algorithm transparency laws apply")
-    print(f"3. Biometric data collection -> Enhanced privacy protections needed")
+    print(f"1. Feature mentions teens in description -> COPPA compliance required")
+    print(f"2. AI and challenges mentioned -> Algorithm transparency laws apply")
+    print(f"3. Dance challenges may involve biometric data -> Enhanced privacy protections needed")
     print(f"4. Social media platform -> State minor protection laws (CA SB976)")
     
     compliance_score = 75  # Based on having government API access

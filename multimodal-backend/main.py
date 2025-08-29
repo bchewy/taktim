@@ -85,9 +85,6 @@ class TikTokFeature(BaseModel):
     feature_name: str = Field(..., description="Name of the TikTok feature")
     description: str = Field(..., description="Detailed description of the feature")
     target_markets: List[str] = Field(default=["US"], description="Target geographical markets")
-    data_collected: List[str] = Field(default=[], description="Types of data collected by the feature")
-    user_demographics: List[str] = Field(default=["general_audience"], description="Target user demographics")
-    ai_components: List[str] = Field(default=[], description="AI/ML components used in the feature")
 
 
 class RegulationInfo(BaseModel):

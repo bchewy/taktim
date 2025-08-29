@@ -207,9 +207,6 @@ class GeoRegulatoryAgent:
             - Name: {feature_data.get('feature_name', 'Unknown Feature')}
             - Description: {feature_data.get('description', 'No description provided')}
             - Target Markets: {', '.join(feature_data.get('target_markets', []))}
-            - Data Collected: {', '.join(feature_data.get('data_collected', []))}
-            - User Demographics: {', '.join(feature_data.get('user_demographics', []))}
-            - AI Components: {', '.join(feature_data.get('ai_components', []))}
             
             **MANDATORY ANALYSIS STEPS:**
             
@@ -251,49 +248,58 @@ class GeoRegulatoryAgent:
         return {"geo_compliance_analysis": result.raw}
     
     def _extract_feature_characteristics(self, feature_data: Dict[str, Any]) -> str:
-        """Extract feature characteristics for regulatory mapping"""
+        """Extract feature characteristics for regulatory mapping from description and feature name"""
         
         characteristics = []
         
-        # Extract from AI components
-        ai_components = feature_data.get('ai_components', [])
-        for component in ai_components:
-            if 'recommendation' in component.lower():
-                characteristics.append('recommendation_engine')
-            if 'personalization' in component.lower():
-                characteristics.append('user_personalization')
-            if 'vision' in component.lower() or 'biometric' in component.lower():
-                characteristics.append('biometric_analysis')
-        
-        # Extract from data collected
-        data_types = feature_data.get('data_collected', [])
-        for data_type in data_types:
-            if 'location' in data_type.lower():
-                characteristics.append('location_tracking')
-            if 'biometric' in data_type.lower():
-                characteristics.append('biometric_analysis')
-            if 'personal' in data_type.lower():
-                characteristics.append('user_personalization')
-        
-        # Extract from user demographics
-        demographics = feature_data.get('user_demographics', [])
-        for demo in demographics:
-            if any(age in demo for age in ['13', '17', 'teen', 'minor', 'child']):
-                characteristics.append('age_detection')
-        
-        # Extract from description
+        # Extract from feature name and description
+        feature_name = feature_data.get('feature_name', '').lower()
         description = feature_data.get('description', '').lower()
-        if 'social' in description or 'sharing' in description:
+        combined_text = f"{feature_name} {description}"
+        
+        # AI/ML detection
+        if any(term in combined_text for term in ['ai', 'ml', 'algorithm', 'machine learning', 'artificial intelligence', 'recommend', 'personalization', 'intelligence']):
+            characteristics.append('recommendation_engine')
+            characteristics.append('user_personalization')
+        
+        # Biometric/facial recognition detection
+        if any(term in combined_text for term in ['biometric', 'facial', 'face', 'recognition', 'vision', 'image analysis']):
+            characteristics.append('biometric_analysis')
+        
+        # Location detection
+        if any(term in combined_text for term in ['location', 'geolocation', 'gps', 'geographic', 'geo']):
+            characteristics.append('location_tracking')
+        
+        # Age/minor detection
+        if any(term in combined_text for term in ['teen', 'child', 'minor', 'age', 'youth', '13', '17', 'under 18']):
+            characteristics.append('age_detection')
+        
+        # Social sharing detection
+        if any(term in combined_text for term in ['social', 'sharing', 'share', 'post', 'comment', 'like', 'follow']):
             characteristics.append('social_sharing')
-        if 'advertis' in description or 'target' in description:
+        
+        # Advertising detection
+        if any(term in combined_text for term in ['advertis', 'target', 'ad', 'marketing', 'promotion']):
             characteristics.append('targeted_advertising')
-        if 'content' in description and 'moderat' in description:
+        
+        # Content moderation detection
+        if any(term in combined_text for term in ['moderat', 'filter', 'content review', 'safety']):
             characteristics.append('content_moderation')
-        if 'analytics' in description or 'track' in description:
+        
+        # Analytics detection
+        if any(term in combined_text for term in ['analytics', 'track', 'metrics', 'data', 'analysis', 'monitoring']):
             characteristics.append('data_analytics')
         
-        # Default characteristics for social media platforms
+        # Video/media detection
+        if any(term in combined_text for term in ['video', 'media', 'content', 'stream', 'upload']):
+            characteristics.append('content_sharing')
+        
+        # Discovery/feed detection
+        if any(term in combined_text for term in ['discovery', 'feed', 'explore', 'trending', 'for you']):
+            characteristics.append('content_curation')
+        
+        # Default characteristics for social media platforms if nothing detected
         if not characteristics:
-            characteristics = ['social_sharing', 'user_personalization']
+            characteristics = ['social_sharing', 'user_personalization', 'content_sharing']
         
         return ', '.join(list(set(characteristics)))
