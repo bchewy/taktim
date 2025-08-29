@@ -5,11 +5,28 @@ Handles text, image, and document processing with specialized agents
 
 import os
 from typing import Dict, List, Any, Optional
+from datetime import datetime
 from crewai import Agent, Task, Crew, Process
 from crewai_tools import FileReadTool, DirectoryReadTool
 from langchain_openai import ChatOpenAI
 import base64
 from pathlib import Path
+
+# Import legal research tools
+try:
+    from ..utils.legal_research_tools import create_legal_research_tools
+    LEGAL_TOOLS_AVAILABLE = True
+except ImportError:
+    LEGAL_TOOLS_AVAILABLE = False
+    print("Warning: Legal research tools not available")
+
+# Import geo-regulatory agent
+try:
+    from .geo_regulatory_agent import GeoRegulatoryAgent
+    GEO_REGULATORY_AVAILABLE = True
+except ImportError:
+    GEO_REGULATORY_AVAILABLE = False
+    print("Warning: Geo-regulatory agent not available")
 
 
 class MultimodalCrew:
@@ -25,6 +42,15 @@ class MultimodalCrew:
         # Initialize tools
         self.file_tool = FileReadTool()
         self.directory_tool = DirectoryReadTool()
+        
+        # Initialize geo-regulatory agent
+        self.geo_regulatory_agent = None
+        if GEO_REGULATORY_AVAILABLE:
+            try:
+                self.geo_regulatory_agent = GeoRegulatoryAgent()
+                print("✅ Geo-Regulatory Agent initialized successfully")
+            except Exception as e:
+                print(f"Warning: Could not initialize Geo-Regulatory Agent: {e}")
         
         # Create specialized agents
         self.agents = self._create_agents()
@@ -71,10 +97,51 @@ class MultimodalCrew:
             allow_delegation=False
         )
         
+        # Legal Knowledge Agent with API-powered tools
+        legal_tools = [self.file_tool, self.directory_tool]
+        
+        # Add legal research tools if available
+        if LEGAL_TOOLS_AVAILABLE:
+            try:
+                congress_api_key = os.getenv("CONGRESS_API_KEY")  # Optional
+                legal_research_tools = create_legal_research_tools(congress_api_key)
+                legal_tools.extend(legal_research_tools)
+                print("✅ Legal research tools (GovInfo, Congress.gov) loaded successfully")
+            except Exception as e:
+                print(f"Warning: Could not load legal research tools: {e}")
+        
+        legal_agent = Agent(
+            role="Legal Compliance Expert",
+            goal="Analyze TikTok features for global regulatory compliance using real-time legal research",
+            backstory="""You are a world-class legal compliance expert with access to real-time 
+            government legal databases including GovInfo.gov (federal regulations) and Congress.gov 
+            (legislative tracking). Your expertise covers:
+            
+            • Federal Regulations: Real-time access to CFR, Federal Register, and agency guidance
+            • Congressional Activity: Current bills and laws affecting social media platforms
+            • State Law Knowledge: California SB976, Florida OPM, Utah SMRA, and other state regulations
+            • Global Data Privacy: GDPR, CCPA, PIPEDA, and international privacy frameworks
+            • Children Protection: COPPA, state minor protection laws, age verification requirements
+            • Social Media Specific: Content moderation, algorithm transparency, platform liability
+            • AI Governance: Emerging AI regulations, explainability requirements, bias auditing
+            
+            IMPORTANT: Always use your legal research tools to get the most current and accurate 
+            legal information before making compliance recommendations. Cross-reference multiple 
+            sources and cite specific regulations in your analysis.
+            
+            You provide actionable compliance guidance with specific technical requirements, 
+            timelines, and risk assessments for each jurisdiction.""",
+            tools=legal_tools,
+            llm=self.llm,
+            verbose=True,
+            allow_delegation=False
+        )
+        
         return {
             "document": document_agent,
             "image": image_agent,
-            "synthesizer": synthesizer_agent
+            "synthesizer": synthesizer_agent,
+            "legal": legal_agent
         }
     
     def analyze_documents(self, file_paths: List[str], query: str) -> str:
@@ -214,6 +281,172 @@ class MultimodalCrew:
             results["synthesis"] = "No content provided for analysis."
         
         return results
+    
+    def analyze_legal_compliance(self, feature_data: Dict[str, Any]) -> Dict[str, Any]:
+        """Analyze TikTok feature for legal compliance using real-time legal research"""
+        
+        task = Task(
+            description=f"""
+            Conduct comprehensive legal compliance analysis for this project using real-time legal research.
+            
+            **Project Details:**
+            - Name: {feature_data.get('project_name', 'Unknown Project')}
+            - Summary: {feature_data.get('summary', 'No summary provided')}
+            - Description: {feature_data.get('project_description', 'No description provided')}
+            - Type: {feature_data.get('project_type', 'Not specified')}
+            - Priority: {feature_data.get('priority', 'Not specified')}
+            
+            **MANDATORY RESEARCH STEPS (You MUST use your legal research tools):**
+            
+            1. **PRIMARY RESEARCH (Required):**
+               - FIRST: Use legal_research tool with topic "social media platform compliance"
+               - SECOND: Use social_media_compliance_research tool for comprehensive analysis
+               - THIRD: Use regulation_details tool for "COPPA" if minors are involved
+               - FOURTH: Use legal_research tool for any AI/algorithm components mentioned
+            
+            2. **Cross-Reference Multiple Sources:**
+               - Verify findings across federal (GovInfo), congressional (Congress.gov), and state sources
+               - Look for recent legislative developments that might affect this feature
+               - Check for enforcement patterns and recent penalties
+            
+            3. **Jurisdiction-Specific Analysis:**
+               For each target market, determine:
+               - Applicable federal laws and regulations
+               - State/local requirements (especially CA, FL, UT for social media)
+               - International requirements (GDPR if global, other privacy laws)
+            
+            4. **Risk and Compliance Assessment:**
+               Based on your research, evaluate:
+               - Compliance status: "compliant" | "needs_review" | "high_risk"
+               - Risk level per jurisdiction: "low" | "medium" | "high"
+               - Specific compliance gaps and requirements
+               - Recommended implementation steps
+            
+            **CRITICAL:** Always cite specific regulations, CFR sections, or bills from your research.
+            Reference the exact source (GovInfo package ID, bill number, etc.) in your analysis.
+            
+            **Output Requirements:**
+            Provide detailed analysis including:
+            - Research citations from your legal research tools
+            - Specific regulation requirements with exact legal references
+            - Technical implementation requirements
+            - Jurisdiction-by-jurisdiction compliance status
+            - Timeline recommendations for compliance implementation
+            """,
+            expected_output="Comprehensive legal compliance analysis with real-time research citations and specific regulatory requirements",
+            agent=self.agents["legal"]
+        )
+        
+        crew = Crew(
+            agents=[self.agents["legal"]],
+            tasks=[task],
+            process=Process.sequential,
+            verbose=True
+        )
+        
+        result = crew.kickoff()
+        return {"legal_analysis": result.raw}
+    
+    def assess_regulatory_risks(self, feature_data: Dict[str, Any], specific_jurisdictions: List[str] = None) -> Dict[str, Any]:
+        """Deep dive risk assessment for specific jurisdictions"""
+        
+        jurisdictions = specific_jurisdictions or feature_data.get('target_markets', ['US', 'EU'])
+        
+        task = Task(
+            description=f"""
+            Perform a detailed regulatory risk assessment for this project:
+            
+            **Project:** {feature_data.get('project_name')}
+            **Type:** {feature_data.get('project_type', 'Not specified')}
+            **Priority:** {feature_data.get('priority', 'Not specified')}
+            
+            **Feature Details:**
+            {feature_data}
+            
+            **Risk Assessment Focus:**
+            
+            1. **High-Risk Scenarios:**
+               - What could go wrong from a legal perspective?
+               - What are the worst-case regulatory outcomes?
+               - Which aspects of the feature are most problematic?
+            
+            2. **Jurisdiction-Specific Risks:**
+               - Analyze each jurisdiction separately
+               - Consider local cultural and legal sensitivities
+               - Factor in enforcement patterns and penalties
+            
+            3. **Precedent Analysis:**
+               - Reference similar features that have faced regulatory scrutiny
+               - Learn from compliance issues at other social media platforms
+            
+            4. **Mitigation Strategies:**
+               - How can identified risks be reduced or eliminated?
+               - What controls or safeguards should be implemented?
+            
+            Provide specific, actionable risk assessment with clear mitigation paths.
+            """,
+            expected_output="Detailed regulatory risk assessment with jurisdiction-specific analysis and mitigation strategies",
+            agent=self.agents["legal"]
+        )
+        
+        crew = Crew(
+            agents=[self.agents["legal"]],
+            tasks=[task],
+            process=Process.sequential,
+            verbose=True
+        )
+        
+        result = crew.kickoff()
+        return {"risk_assessment": result.raw}
+    
+    def analyze_comprehensive_compliance(self, feature_data: Dict[str, Any]) -> Dict[str, Any]:
+        """Comprehensive compliance analysis combining legal research and geo-regulatory mapping"""
+        
+        if not self.geo_regulatory_agent:
+            return {"error": "Geo-Regulatory Agent not available"}
+        
+        # Step 1: Legal research using government APIs
+        legal_analysis = self.analyze_legal_compliance(feature_data)
+        
+        # Step 2: Geo-regulatory mapping for jurisdiction-specific requirements
+        geo_analysis = self.geo_regulatory_agent.analyze_geo_compliance(feature_data)
+        
+        # Step 3: Combined analysis
+        comprehensive_result = {
+            "project_id": feature_data.get('project_name', 'Unknown'),
+            "analysis_timestamp": datetime.utcnow().isoformat(),
+            "legal_research": legal_analysis,
+            "geo_regulatory_mapping": geo_analysis,
+            "compliance_status": self._determine_overall_compliance_status(legal_analysis, geo_analysis),
+            "audit_trail_ready": True
+        }
+        
+        return comprehensive_result
+    
+    def _determine_overall_compliance_status(self, legal_analysis: Dict, geo_analysis: Dict) -> Dict[str, Any]:
+        """Determine overall compliance status from combined analyses"""
+        
+        # Extract risk indicators from both analyses
+        has_legal_concerns = "high" in str(legal_analysis).lower() or "critical" in str(legal_analysis).lower()
+        has_geo_concerns = "HIGH" in str(geo_analysis) or "CRITICAL" in str(geo_analysis)
+        
+        if has_legal_concerns or has_geo_concerns:
+            status = "REQUIRES_IMMEDIATE_REVIEW"
+            risk_level = "HIGH"
+        elif "medium" in str(legal_analysis).lower() or "MEDIUM" in str(geo_analysis):
+            status = "NEEDS_COMPLIANCE_IMPLEMENTATION"  
+            risk_level = "MEDIUM"
+        else:
+            status = "COMPLIANT_WITH_MONITORING"
+            risk_level = "LOW"
+        
+        return {
+            "overall_status": status,
+            "risk_level": risk_level,
+            "legal_analysis_complete": "legal_analysis" in str(legal_analysis),
+            "geo_mapping_complete": "geo_compliance_analysis" in str(geo_analysis),
+            "regulatory_inquiry_ready": True
+        }
 
 
 class ChatAgent:
@@ -221,7 +454,7 @@ class ChatAgent:
     
     def __init__(self):
         self.llm = ChatOpenAI(
-            model="gpt-4o",
+            model="gpt-4o-mini-2024-07-18",
             temperature=0.3,
             api_key=os.getenv("OPENAI_API_KEY")
         )

@@ -1,92 +1,70 @@
-# GeoGov Frontend
+# Getting Started with Create React App
 
-React frontend for the GeoGov Lite compliance analysis system.
+This project was bootstrapped with [Create React App](https://github.com/facebook/create-react-app).
 
-## Features
+## Available Scripts
 
-- **Feature Analysis Form**: Submit software features for LangChain RAG-powered compliance analysis
-- **Real-time Results**: View detailed compliance decisions with confidence scores
-- **System Status**: Monitor backend health and knowledge base status
-- **Corpus Management**: Refresh legal document corpus
-- **Evidence Export**: Download analysis evidence and receipts
+In the project directory, you can run:
 
-## Setup
+### `npm start`
 
-### Prerequisites
+Runs the app in the development mode.\
+Open [http://localhost:3000](http://localhost:3000) to view it in your browser.
 
-- Node.js 18+ 
-- npm or yarn
-- GeoGov backend running on port 8000
+The page will reload when you make changes.\
+You may also see any lint errors in the console.
 
-### Installation
+### `npm test`
 
-1. Install dependencies:
-```bash
-npm install
-```
+Launches the test runner in the interactive watch mode.\
+See the section about [running tests](https://facebook.github.io/create-react-app/docs/running-tests) for more information.
 
-2. Start development server:
-```bash
-npm run dev
-```
+### `npm run build`
 
-The frontend will be available at `http://localhost:3000`
+Builds the app for production to the `build` folder.\
+It correctly bundles React in production mode and optimizes the build for the best performance.
 
-### Production Build
+The build is minified and the filenames include the hashes.\
+Your app is ready to be deployed!
 
-```bash
-npm run build
-npm run preview
-```
+See the section about [deployment](https://facebook.github.io/create-react-app/docs/deployment) for more information.
 
-## Architecture
+### `npm run eject`
 
-### Components
+**Note: this is a one-way operation. Once you `eject`, you can't go back!**
 
-- **App.jsx**: Main application component with state management
-- **AnalysisForm.jsx**: Form for inputting feature details
-- **ResultDisplay.jsx**: Displays compliance analysis results
-- **SystemStatus.jsx**: Shows backend system health
+If you aren't satisfied with the build tool and configuration choices, you can `eject` at any time. This command will remove the single build dependency from your project.
 
-### API Client
+Instead, it will copy all the configuration files and the transitive dependencies (webpack, Babel, ESLint, etc) right into your project so you have full control over them. All of the commands except `eject` will still work, but they will point to the copied scripts so you can tweak them. At this point you're on your own.
 
-- **client.js**: Axios-based API client for backend communication
-- Handles all REST API calls to the FastAPI backend
-- Includes file download functionality for evidence
+You don't have to ever use `eject`. The curated feature set is suitable for small and middle deployments, and you shouldn't feel obligated to use this feature. However we understand that this tool wouldn't be useful if you couldn't customize it when you are ready for it.
 
-## Backend Integration
+## Learn More
 
-The frontend integrates with the GeoGov FastAPI backend endpoints:
+You can learn more in the [Create React App documentation](https://facebook.github.io/create-react-app/docs/getting-started).
 
-- `POST /api/analyze` - Single feature analysis
-- `POST /api/bulk_analyze` - Bulk feature analysis
-- `GET /api/health` - System health check
-- `POST /api/refresh_corpus` - Refresh legal document corpus
-- `GET /api/evidence` - Download evidence ZIP
+To learn React, check out the [React documentation](https://reactjs.org/).
 
-## LangChain RAG Features
+### Code Splitting
 
-The frontend showcases the LangChain RAG capabilities:
+This section has moved here: [https://facebook.github.io/create-react-app/docs/code-splitting](https://facebook.github.io/create-react-app/docs/code-splitting)
 
-1. **Smart Legal Search**: Uses vector similarity to find relevant regulations
-2. **AI-Powered Analysis**: GPT-5 analyzes features against legal context
-3. **Evidence-Based Decisions**: Shows legal citations and confidence scores
-4. **Real-time Processing**: Live updates during analysis
+### Analyzing the Bundle Size
 
-## Development
+This section has moved here: [https://facebook.github.io/create-react-app/docs/analyzing-the-bundle-size](https://facebook.github.io/create-react-app/docs/analyzing-the-bundle-size)
 
-The frontend is built with:
+### Making a Progressive Web App
 
-- **React 18**: Component-based UI framework
-- **Vite**: Fast build tool and dev server
-- **Tailwind CSS**: Utility-first CSS framework
-- **Lucide React**: Beautiful icon library
-- **Axios**: HTTP client for API calls
+This section has moved here: [https://facebook.github.io/create-react-app/docs/making-a-progressive-web-app](https://facebook.github.io/create-react-app/docs/making-a-progressive-web-app)
 
-## Environment Variables
+### Advanced Configuration
 
-Create a `.env` file in the frontend directory:
+This section has moved here: [https://facebook.github.io/create-react-app/docs/advanced-configuration](https://facebook.github.io/create-react-app/docs/advanced-configuration)
 
-```env
-VITE_API_BASE_URL=http://localhost:8000
-```
+### Deployment
+
+This section has moved here: [https://facebook.github.io/create-react-app/docs/deployment](https://facebook.github.io/create-react-app/docs/deployment)
+
+### `npm run build` fails to minify
+
+This section has moved here: [https://facebook.github.io/create-react-app/docs/troubleshooting#npm-run-build-fails-to-minify](https://facebook.github.io/create-react-app/docs/troubleshooting#npm-run-build-fails-to-minify)

@@ -1,0 +1,81 @@
+/* Tailwind CSS imports will be added to index.css */
+
+/* Custom styles for the geo-compliance app */
+.App {
+  min-height: 100vh;
+}
+
+/* Loading spinner animations */
+@keyframes spin {
+  0% { transform: rotate(0deg); }
+  100% { transform: rotate(360deg); }
+}
+
+.animate-spin {
+  animation: spin 1s linear infinite;
+}
+
+/* Custom scrollbar for better UX */
+::-webkit-scrollbar {
+  width: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: #f1f1f1;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #c1c1c1;
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #a1a1a1;
+}
+
+/* Form focus styles */
+input:focus,
+textarea:focus,
+select:focus {
+  outline: none;
+  border-color: #3b82f6;
+  box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1);
+}
+
+/* Button hover effects */
+button {
+  transition: all 0.2s ease-in-out;
+}
+
+/* Alert animations */
+.alert-enter {
+  opacity: 0;
+  transform: translateY(-10px);
+}
+
+.alert-enter-active {
+  opacity: 1;
+  transform: translateY(0);
+  transition: all 0.3s ease-in-out;
+}
+
+/* Risk level indicators */
+.risk-low {
+  background-color: #10b981;
+  color: white;
+}
+
+.risk-medium {
+  background-color: #f59e0b;
+  color: white;
+}
+
+.risk-high {
+  background-color: #ef4444;
+  color: white;
+}
+
+.risk-critical {
+  background-color: #dc2626;
+  color: white;
+}
