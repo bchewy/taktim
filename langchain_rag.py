@@ -346,11 +346,130 @@ Answer:"""
         
         prompt = ChatPromptTemplate.from_template(template)
         
-        # Create the RAG chain
-        llm = ChatOpenAI(model="gpt-5-2025-08-07", temperature=0)
+        # Create the RAG chain with fallback model
+        try:
+            print(f"🔧 Trying GPT-5 model...")
+            llm = ChatOpenAI(
+                model="gpt-5-2025-08-07", 
+                temperature=0, 
+                request_timeout=60,  # Increased timeout for GPT-5
+                max_retries=2
+            )
+            model_name = "gpt-5-2025-08-07"
+        except Exception as e:
+            print(f"⚠️  GPT-5 setup failed ({e}), falling back to GPT-4o")
+            llm = ChatOpenAI(
+                model="gpt-4o", 
+                temperature=0, 
+                request_timeout=45,
+                max_retries=2
+            )
+            model_name = "gpt-4o"
         
         def format_docs(docs):
-            return "\n\n".join(doc.page_content for doc in docs)
+            print(f"📄 Formatting {len(docs)} retrieved documents")
+            formatted_docs = []
+            total_length = 0
+            max_context_length = 8000  # Reasonable limit
+            
+            for i, doc in enumerate(docs):
+                doc_content = doc.page_content[:1000]  # Limit each doc to 1000 chars
+                if total_length + len(doc_content) > max_context_length:
+                    print(f"   ⚠️  Truncating context at doc {i} to stay under {max_context_length} chars")
+                    break
+                formatted_docs.append(doc_content)
+                total_length += len(doc_content)
+            
+            formatted = "\n\n".join(formatted_docs)
+            print(f"📝 Final context length: {len(formatted)} chars from {len(formatted_docs)} docs")
+            return formatted
+        
+        print(f"🔧 Setting up RAG chain with {model_name}")
+        self.rag_chain = (
+            {"context": self.retriever | format_docs, "question": RunnablePassthrough()}
+            | prompt
+            | llm
+            | StrOutputParser()
+        )
+        print(f"✅ RAG chain setup complete")
+    
+    def _safe_rag_invoke(self, prompt: str) -> str:
+        """Safely invoke RAG chain with minimal logging"""
+        import time
+        
+        start_time = time.time()
+        print(f"🔄 Starting RAG chain invoke...")
+        
+        try:
+            if not self.rag_chain:
+                raise ValueError("RAG chain not initialized")
+            
+            print(f"📡 Calling LLM via RAG chain...")
+            result = self.rag_chain.invoke(prompt)
+            
+            total_time = time.time() - start_time
+            print(f"✅ RAG chain completed in {total_time:.2f}s, response length: {len(result)} chars")
+            
+            return result
+            
+        except Exception as e:
+            total_time = time.time() - start_time
+            print(f"❌ RAG chain failed after {total_time:.2f}s: {type(e).__name__}: {str(e)}")
+            
+            error_msg = str(e).lower()
+            if "timeout" in error_msg or "request timed out" in error_msg:
+                print(f"⏰ Timeout detected, attempting fallback...")
+                try:
+                    self._setup_rag_chain_with_fallback()
+                    fallback_start = time.time()
+                    result = self.rag_chain.invoke(prompt)
+                    fallback_time = time.time() - fallback_start
+                    print(f"✅ Fallback succeeded in {fallback_time:.2f}s")
+                    return result
+                except Exception as fallback_error:
+                    print(f"❌ Fallback failed: {fallback_error}")
+                    raise e
+            else:
+                raise
+    
+    def _setup_rag_chain_with_fallback(self):
+        """Setup RAG chain with GPT-4o as fallback"""
+        print(f"🔄 Setting up fallback RAG chain with GPT-4o...")
+        
+        template = """You are a legal compliance expert. Use the following pieces of context to answer the question about legal regulations and compliance requirements.
+
+Context:
+{context}
+
+Question: {question}
+
+Answer:"""
+        
+        prompt = ChatPromptTemplate.from_template(template)
+        
+        # Use GPT-4o as fallback
+        llm = ChatOpenAI(
+            model="gpt-4o", 
+            temperature=0, 
+            request_timeout=45,
+            max_retries=1
+        )
+        
+        def format_docs(docs):
+            formatted_docs = []
+            total_length = 0
+            max_context_length = 6000  # Smaller for fallback
+            
+            for i, doc in enumerate(docs):
+                doc_content = doc.page_content[:800]  # Smaller chunks for fallback
+                if total_length + len(doc_content) > max_context_length:
+                    break
+                formatted_docs.append(doc_content)
+                total_length += len(doc_content)
+            
+            formatted = "\n\n".join(formatted_docs)
+            print(f"📝 Fallback context length: {len(formatted)} chars from {len(formatted_docs)} docs")
+            return formatted
         
         self.rag_chain = (
             {"context": self.retriever | format_docs, "question": RunnablePassthrough()}
@@ -358,6 +477,109 @@ Answer:"""
             | llm
             | StrOutputParser()
         )
+        print(f"✅ Fallback RAG chain ready")
+    
+    def _parse_compliance_response(self, response: str, response_type: str) -> Dict[str, Any]:
+        """Parse natural language response into structured format"""
+        try:
+            # Try JSON first in case the model still returns JSON
+            if response.strip().startswith('{'):
+                try:
+                    return json.loads(response)
+                except json.JSONDecodeError:
+                    pass
+            
+            # Parse natural language response
+            lines = response.split('\n')
+            result = {}
+            
+            if response_type == "finder":
+                result = {"signals": [], "claims": [], "citations": []}
+                current_section = None
+                
+                for line in lines:
+                    line = line.strip()
+                    if not line:
+                        continue
+                    
+                    if 'SIGNALS:' in line.upper():
+                        current_section = 'signals'
+                    elif 'CLAIMS:' in line.upper():
+                        current_section = 'claims'
+                    elif 'CITATIONS:' in line.upper():
+                        current_section = 'citations'
+                    elif current_section == 'signals' and line.startswith(('-', '*', '•')) or len(line) > 2:
+                        signal = line.lstrip('-*•').strip()
+                        if signal:
+                            result['signals'].append(signal)
+                    elif current_section == 'claims' and line:
+                        # Simple parsing for claims
+                        if ':' in line:
+                            parts = line.split(':', 1)
+                            result['claims'].append({
+                                "regulation": parts[0].strip(),
+                                "why": parts[1].strip() if len(parts) > 1 else "",
+                                "citations": []
+                            })
+                    elif current_section == 'citations' and line:
+                        citation = line.lstrip('-*•').strip()
+                        if citation:
+                            result['citations'].append(citation)
+            
+            elif response_type == "counter":
+                result = {"counter_points": [], "missing_signals": [], "citations": []}
+                current_section = None
+                
+                for line in lines:
+                    line = line.strip()
+                    if not line:
+                        continue
+                    
+                    if 'COUNTER' in line.upper() or 'POINTS' in line.upper():
+                        current_section = 'counter_points'
+                    elif 'MISSING' in line.upper():
+                        current_section = 'missing_signals'
+                    elif 'CITATIONS:' in line.upper():
+                        current_section = 'citations'
+                    elif current_section and line.startswith(('-', '*', '•', '1', '2', '3')) or len(line) > 2:
+                        item = line.lstrip('-*•0123456789.').strip()
+                        if item and current_section in result:
+                            result[current_section].append(item)
+            
+            elif response_type == "judge":
+                # Extract key information from judge response
+                result = {
+                    "signals": [],
+                    "notes": response[:500],  # First 500 chars as notes
+                    "confidence": 0.7  # Default confidence
+                }
+                
+                # Try to extract confidence if mentioned
+                import re
+                confidence_match = re.search(r'confidence[:\s]+([0-9.]+)', response.lower())
+                if confidence_match:
+                    try:
+                        result['confidence'] = float(confidence_match.group(1))
+                    except:
+                        pass
+                
+                # Extract decision if mentioned
+                if 'requires compliance' in response.lower() or 'needs compliance' in response.lower():
+                    result['requires_compliance'] = True
+                elif 'does not require' in response.lower() or 'no compliance' in response.lower():
+                    result['requires_compliance'] = False
+            
+            return result
+            
+        except Exception as e:
+            print(f"⚠️  Failed to parse response: {e}")
+            # Return minimal structure with raw response
+            if response_type == "finder":
+                return {"signals": [], "claims": [], "citations": [], "raw_response": response}
+            elif response_type == "counter":
+                return {"counter_points": [], "missing_signals": [], "citations": [], "raw_response": response}
+            else:
+                return {"signals": [], "notes": response[:200], "confidence": 0.5, "raw_response": response}
     
     async def index_scraped_documents(self, scraped_docs: List[ScrapedDocument], force_refresh: bool = False, skip_indexing: bool = False) -> int:
         """Index scraped legal documents into the RAG system"""
@@ -480,65 +702,59 @@ Answer:"""
                 "sources": []
             }
     
-    async def compliance_finder(self, artifact_title: str, artifact_description: str, artifact_docs: List[str], 
+    def compliance_finder(self, artifact_title: str, artifact_description: str, artifact_docs: List[str], 
                                artifact_code_hints: List[str], artifact_tags: List[str]) -> Dict[str, Any]:
         """Find compliance signals and regulations using LangChain RAG"""
         
-        prompt = f"""Analyze this software feature for geographical compliance requirements:
+        prompt = f"""Feature: {artifact_title}
+Description: {artifact_description}
+Tags: {', '.join(artifact_tags) if artifact_tags else 'none'}
 
-**Feature:** {artifact_title}
-**Description:** {artifact_description}
-**Documentation:** {' '.join(artifact_docs)}
-**Code Hints:** {' '.join(artifact_code_hints)}
-**Tags:** {', '.join(artifact_tags)}
-
-Based on the legal documents in your knowledge base, identify:
-1. Compliance signals (keywords/concepts that suggest regulatory requirements)
-2. Specific regulations that may apply to this feature
-3. Why each regulation applies
-4. Citations to support your analysis
-
-Return your analysis as JSON with this structure:
-{{
-"signals": ["list of compliance signals found"],
-"claims": [
-    {{
-    "regulation": "regulation name", 
-    "why": "explanation why this regulation applies",
-    "citations": ["document reference"]
-    }}
-],
-"citations": ["list of all document references used"]
-}}"""
+Does this feature need geographical compliance? List:
+- SIGNALS: Compliance indicators found
+- CLAIMS: Relevant regulations
+- CITATIONS: Sources"""
 
         try:
+            print(f"🔍 compliance_finder: Starting analysis")
+            
+            # Initialize retriever if needed (do this synchronously before async operations)
             if not self.rag_chain:
-                # Try to initialize from existing index
-                try:
-                    self._initialize_existing_retriever()
-                except Exception as e:
-                    return {
-                        "signals": [],
-                        "claims": [],
-                        "citations": [],
-                        "error": f"RAG system not available: {str(e)}"
-                    }
+                print(f"⚠️  RAG chain not initialized, initializing now...")
+                self._initialize_existing_retriever()
+                print(f"✅ RAG chain initialized")
             
-            result = self.rag_chain.invoke(prompt)
+            print(f"🤖 Invoking RAG chain with prompt length: {len(prompt)} chars")
+            print(f"🔍 Query preview: {prompt[:200]}...")
             
-            # Try to parse JSON from the result
+            # Add timeout to prevent hanging
+            import asyncio
+            import time
+            start_time = time.time()
+            
             try:
-                parsed_result = json.loads(result)
-                return parsed_result
-            except json.JSONDecodeError:
-                # If not valid JSON, extract what we can
+                print(f"⏱️  Starting LLM call at {time.strftime('%H:%M:%S')}")
+                
+                # Call synchronously - we're already in an async context
+                result = self._safe_rag_invoke(prompt)
+                
+                end_time = time.time()
+                duration = end_time - start_time
+                print(f"✅ RAG chain returned result in {duration:.2f}s, length: {len(result)} chars")
+                print(f"🔍 Response preview: {result[:200]}...")
+            except Exception as e:
+                end_time = time.time()
+                duration = end_time - start_time
+                print(f"❌ RAG chain failed after {duration:.2f}s: {type(e).__name__}: {str(e)}")
                 return {
                     "signals": [],
                     "claims": [],
                     "citations": [],
-                    "raw_response": result,
-                    "error": "Could not parse JSON response"
+                    "error": "Analysis timed out - please try again"
                 }
+            
+            # Parse the natural language response
+            return self._parse_compliance_response(result, response_type="finder")
                 
         except Exception as e:
             return {
@@ -548,55 +764,55 @@ Return your analysis as JSON with this structure:
                 "error": f"LangChain RAG query failed: {str(e)}"
             }
     
-    async def compliance_counter(self, artifact_title: str, artifact_description: str, artifact_docs: List[str], 
+    def compliance_counter(self, artifact_title: str, artifact_description: str, artifact_docs: List[str], 
                                 artifact_code_hints: List[str], artifact_tags: List[str]) -> Dict[str, Any]:
         """Find counter-arguments and missing signals using LangChain RAG"""
         
-        prompt = f"""Analyze this software feature for potential exemptions or counter-arguments to geographical compliance:
+        prompt = f"""Feature: {artifact_title}
+Description: {artifact_description}
 
-**Feature:** {artifact_title}
-**Description:** {artifact_description}
-**Documentation:** {' '.join(artifact_docs)}
-**Code Hints:** {' '.join(artifact_code_hints)}
-**Tags:** {', '.join(artifact_tags)}
-
-Based on the legal documents in your knowledge base, find counter-arguments and missing signals that might suggest this feature does NOT require geographical compliance:
-1. Counter-points (arguments against compliance requirements)
-2. Missing signals (compliance indicators that are notably absent)
-3. Citations supporting your counter-analysis
-
-Return as JSON:
-{{
-"counter_points": ["list of arguments against compliance requirements"],
-"missing_signals": ["list of compliance signals that are notably missing"],
-"citations": ["list of document references"]
-}}"""
+List reasons this might NOT need compliance:
+- COUNTER POINTS: Arguments against
+- MISSING SIGNALS: What's absent
+- CITATIONS: Sources"""
 
         try:
+            print(f"🔍 compliance_counter: Starting counter-analysis")
+            
             if not self.rag_chain:
-                try:
-                    self._initialize_existing_retriever()
-                except Exception as e:
-                    return {
-                        "counter_points": [],
-                        "missing_signals": [],
-                        "citations": [],
-                        "error": f"RAG system not available: {str(e)}"
-                    }
+                print(f"⚠️  RAG chain not initialized for counter analysis, initializing...")
+                self._initialize_existing_retriever()
+                print(f"✅ RAG chain initialized")
             
-            result = self.rag_chain.invoke(prompt)
+            print(f"🤖 Invoking RAG chain for counter analysis")
             
+            # Add timeout to prevent hanging
+            import asyncio
+            import time
             try:
-                parsed_result = json.loads(result)
-                return parsed_result
-            except json.JSONDecodeError:
+                print(f"⏱️  Starting counter analysis LLM call at {time.strftime('%H:%M:%S')}")
+                start_time = time.time()
+                
+                # Call synchronously
+                result = self._safe_rag_invoke(prompt)
+                
+                end_time = time.time()
+                duration = end_time - start_time
+                print(f"✅ Counter analysis completed in {duration:.2f}s, result length: {len(result)} chars")
+                print(f"🔍 Counter response preview: {result[:200]}...")
+            except Exception as e:
+                end_time = time.time() 
+                duration = end_time - start_time
+                print(f"❌ Counter analysis failed after {duration:.2f}s: {type(e).__name__}: {str(e)}")
                 return {
                     "counter_points": [],
                     "missing_signals": [],
                     "citations": [],
-                    "raw_response": result,
-                    "error": "Could not parse JSON response"
+                    "error": "Counter analysis timed out - please try again"
                 }
+            
+            # Parse the natural language response
+            return self._parse_compliance_response(result, response_type="counter")
                 
         except Exception as e:
             return {
@@ -606,7 +822,7 @@ Return as JSON:
                 "error": f"LangChain RAG query failed: {str(e)}"
             }
     
-    async def compliance_judge(self, artifact_title: str, artifact_description: str, 
+    def compliance_judge(self, artifact_title: str, artifact_description: str, 
                               finder_signals: List[str], finder_claims: List[Dict], 
                               counter_points: List[str], missing_signals: List[str], 
                               make_decision: bool = False) -> Dict[str, Any]:
@@ -620,13 +836,11 @@ Return as JSON:
 4. Combine all relevant signals found
 5. Provide clear reasoning
 
-Return as JSON:
-{
-"signals": ["combined list of all relevant signals"],
-"notes": "detailed reasoning for your decision", 
-"confidence": 0.85,
-"requires_compliance": true
-}"""
+Provide:
+- Your confidence level (0.0 to 1.0)
+- Clear reasoning for your decision
+- Whether this feature requires compliance (yes/no)
+- Key signals identified"""
         else:
             instructions = """**Instructions:**
 1. Synthesize all evidence for and against
@@ -635,61 +849,67 @@ Return as JSON:
 4. Provide clear reasoning notes
 5. DO NOT make the final compliance decision
 
-Return as JSON:
-{
-"signals": ["combined list of all relevant signals"],
-"notes": "detailed reasoning and analysis",
-"confidence": 0.85
-}"""
+Provide:
+- Your confidence level (0.0 to 1.0)  
+- Detailed reasoning and analysis
+- Key signals identified
+
+Do NOT make the final compliance decision."""
         
-        prompt = f"""Analyze this software feature for geographical regulatory compliance:
+        prompt = f"""Feature: {artifact_title}
 
-**Feature:** {artifact_title}
-**Description:** {artifact_description}
-
-**Evidence FOR compliance (from finder analysis):**
-- Signals found: {', '.join(finder_signals)}
-- Regulatory claims: {json.dumps(finder_claims, indent=2)}
-
-**Evidence AGAINST compliance (from counter analysis):**
-- Counter-points: {', '.join(counter_points)}
-- Missing signals: {', '.join(missing_signals)}
+FOR compliance: {', '.join(finder_signals[:3]) if finder_signals else 'none'}
+AGAINST compliance: {', '.join(counter_points[:3]) if counter_points else 'none'}
 
 {instructions}"""
 
         try:
+            print(f"🔍 compliance_judge: Starting final analysis (make_decision={make_decision})")
+            
             if not self.rag_chain:
-                try:
-                    self._initialize_existing_retriever()
-                except Exception as e:
-                    return {
-                        "signals": list(set(finder_signals + missing_signals)),
-                        "notes": f"RAG system not available: {str(e)}",
-                        "confidence": 0.0,
-                        "error": str(e)
-                    }
+                print(f"⚠️  RAG chain not initialized for judge analysis, initializing...")
+                self._initialize_existing_retriever()
+                print(f"✅ RAG chain initialized")
             
-            result = self.rag_chain.invoke(prompt)
+            print(f"🤖 Invoking RAG chain for judge analysis")
             
+            # Add timeout to prevent hanging
+            import asyncio
+            import time
             try:
-                parsed_result = json.loads(result)
-                # Ensure we have all required fields
-                if "signals" not in parsed_result:
-                    parsed_result["signals"] = list(set(finder_signals + missing_signals))
-                if "confidence" not in parsed_result:
-                    parsed_result["confidence"] = 0.5
-                if "notes" not in parsed_result:
-                    parsed_result["notes"] = "Analysis completed"
+                print(f"⏱️  Starting judge analysis LLM call at {time.strftime('%H:%M:%S')}")
+                start_time = time.time()
                 
-                return parsed_result
-            except json.JSONDecodeError:
+                # Call synchronously
+                result = self._safe_rag_invoke(prompt)
+                
+                end_time = time.time()
+                duration = end_time - start_time
+                print(f"✅ Judge analysis completed in {duration:.2f}s, result length: {len(result)} chars")
+                print(f"🔍 Judge response preview: {result[:200]}...")
+            except Exception as e:
+                end_time = time.time()
+                duration = end_time - start_time
+                print(f"❌ Judge analysis failed after {duration:.2f}s: {type(e).__name__}: {str(e)}")
                 return {
                     "signals": list(set(finder_signals + missing_signals)),
-                    "notes": f"JSON parse failed, raw response: {result[:200]}...",
+                    "notes": "Judge analysis timed out - please try again",
                     "confidence": 0.0,
-                    "raw_response": result,
-                    "error": "Could not parse JSON response"
+                    "error": "Judge analysis timed out"
                 }
+            
+            # Parse the natural language response
+            parsed_result = self._parse_compliance_response(result, response_type="judge")
+            
+            # Ensure we have all required fields
+            if "signals" not in parsed_result or not parsed_result["signals"]:
+                parsed_result["signals"] = list(set(finder_signals + missing_signals))
+            if "confidence" not in parsed_result:
+                parsed_result["confidence"] = 0.5
+            if "notes" not in parsed_result:
+                parsed_result["notes"] = "Analysis completed"
+            
+            return parsed_result
                 
         except Exception as e:
             return {

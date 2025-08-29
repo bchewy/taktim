@@ -1,7 +1,36 @@
-import React from 'react'
-import { CheckCircle, AlertCircle, Database, Brain } from 'lucide-react'
+import React, { useState, useEffect } from 'react'
+import { CheckCircle, AlertCircle, Database, Brain, Zap } from 'lucide-react'
+import { getRagStatus, toggleRag } from '../api/client'
 
 const SystemStatus = ({ health }) => {
+  const [ragEnabled, setRagEnabled] = useState(true)
+  const [toggling, setToggling] = useState(false)
+
+  useEffect(() => {
+    fetchRagStatus()
+  }, [])
+
+  const fetchRagStatus = async () => {
+    try {
+      const status = await getRagStatus()
+      setRagEnabled(status.use_rag)
+    } catch (error) {
+      console.error('Failed to fetch RAG status:', error)
+    }
+  }
+
+  const handleToggleRag = async () => {
+    setToggling(true)
+    try {
+      const result = await toggleRag(!ragEnabled)
+      setRagEnabled(result.use_rag)
+    } catch (error) {
+      console.error('Failed to toggle RAG:', error)
+    } finally {
+      setToggling(false)
+    }
+  }
+
   if (!health) {
     return null
   }
@@ -34,10 +63,25 @@ const SystemStatus = ({ health }) => {
             </div>
 
             <div className="flex items-center">
-              <Brain className="w-4 h-4 text-purple-500 mr-2" />
-              <span className="text-sm text-gray-600">
-                LangChain RAG Active
-              </span>
+              <button
+                onClick={handleToggleRag}
+                disabled={toggling}
+                className={`flex items-center px-3 py-1 rounded-full text-xs font-medium transition-colors ${
+                  ragEnabled 
+                    ? 'bg-purple-100 text-purple-800 hover:bg-purple-200' 
+                    : 'bg-yellow-100 text-yellow-800 hover:bg-yellow-200'
+                } ${toggling ? 'opacity-50 cursor-not-allowed' : ''}`}
+              >
+                {ragEnabled ? (
+                  <Brain className="w-3 h-3 mr-1" />
+                ) : (
+                  <Zap className="w-3 h-3 mr-1" />
+                )}
+                {ragEnabled ? 'RAG Mode' : 'Direct Mode'}
+                <span className="ml-1 text-xs">
+                  {ragEnabled ? '(Comprehensive)' : '(Fast)'}
+                </span>
+              </button>
             </div>
           </div>
 

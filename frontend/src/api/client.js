@@ -29,6 +29,12 @@ export const getRagStatus = async () => {
   return response.data
 }
 
+export const toggleRag = async (enable = null) => {
+  const params = enable !== null ? { enable } : {}
+  const response = await api.post('/api/toggle_rag', null, { params })
+  return response.data
+}
+
 export const refreshCorpus = async () => {
   const response = await api.post('/api/refresh_corpus')
   return response.data

@@ -1,15 +1,81 @@
 import React from 'react'
 import { AlertTriangle, CheckCircle, Info, ExternalLink, Loader2 } from 'lucide-react'
 
-const ResultDisplay = ({ result, loading }) => {
+const ResultDisplay = ({ result, loading, loadingStage }) => {
   if (loading) {
+    const allStages = [
+      {
+        id: 'initializing',
+        text: 'Initializing analysis...',
+        subtext: 'Preparing feature data for processing'
+      },
+      {
+        id: 'vector_search',
+        text: 'Searching legal knowledge base...',
+        subtext: 'Using vector similarity to find relevant regulations'
+      },
+      {
+        id: 'rag_retrieval',
+        text: 'Retrieving relevant documents...',
+        subtext: 'LangChain RAG finding compliance context'
+      },
+      {
+        id: 'ai_analysis',
+        text: 'AI analyzing compliance requirements...',
+        subtext: 'GPT model processing legal context and feature details'
+      },
+      {
+        id: 'generating_response',
+        text: 'Generating compliance assessment...',
+        subtext: 'Finalizing recommendations and confidence scores'
+      }
+    ]
+
+    // Filter stages based on whether we're in vector_search/rag_retrieval (RAG mode)
+    const isRagMode = ['vector_search', 'rag_retrieval'].includes(loadingStage)
+    const stages = isRagMode 
+      ? allStages 
+      : allStages.filter(s => !['vector_search', 'rag_retrieval'].includes(s.id))
+
+    const currentStage = allStages.find(stage => stage.id === loadingStage) || allStages[0]
+    const currentIndex = stages.findIndex(stage => stage.id === loadingStage)
+
     return (
       <div className="flex flex-col items-center justify-center h-64">
         <Loader2 className="w-8 h-8 text-blue-600 animate-spin mb-4" />
-        <p className="text-gray-600">Running LangChain RAG analysis...</p>
-        <p className="text-sm text-gray-500 mt-2">
-          Searching legal documents and analyzing compliance requirements
-        </p>
+        <p className="text-gray-600 font-medium">{currentStage.text}</p>
+        <p className="text-sm text-gray-500 mt-2">{currentStage.subtext}</p>
+        
+        {/* Progress indicator */}
+        <div className="mt-6 w-64">
+          <div className="flex justify-between mb-2">
+            <span className="text-xs text-gray-500">Progress</span>
+            <span className="text-xs text-gray-500">{currentIndex + 1} of {stages.length}</span>
+          </div>
+          <div className="w-full bg-gray-200 rounded-full h-2">
+            <div 
+              className="bg-blue-600 h-2 rounded-full transition-all duration-500"
+              style={{ width: `${((currentIndex + 1) / stages.length) * 100}%` }}
+            />
+          </div>
+          <div className="mt-2 text-xs text-gray-500">
+            {isRagMode ? 'RAG analysis typically takes 30-60 seconds' : 'Direct analysis typically takes 5-15 seconds'}
+          </div>
+        </div>
+
+        {/* Stage indicators */}
+        <div className="mt-4 flex space-x-2">
+          {stages.map((stage, index) => (
+            <div
+              key={stage.id}
+              className={`w-2 h-2 rounded-full ${
+                index <= currentIndex
+                  ? 'bg-blue-600'
+                  : 'bg-gray-300'
+              }`}
+            />
+          ))}
+        </div>
       </div>
     )
   }
