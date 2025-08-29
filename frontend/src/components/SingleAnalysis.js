@@ -2,12 +2,12 @@ import React, { useState } from "react";
 
 const SingleAnalysis = () => {
     const [formData, setFormData] = useState({
-        summary: "",              // Required
-        project_name: "",         // Required  
-        project_description: "",  // Required
-        project_type: "",         // Optional
-        priority: "",             // Optional
-        due_date: ""              // Optional
+        summary: "", // Required
+        project_name: "", // Required
+        project_description: "", // Required
+        project_type: "", // Optional
+        priority: "", // Optional
+        due_date: "", // Optional
     });
 
     const [isAnalyzing, setIsAnalyzing] = useState(false);
@@ -32,10 +32,11 @@ const SingleAnalysis = () => {
         setFormData({
             summary: "Video Upload feature",
             project_name: "Video upload limits for new users",
-            project_description: "Introduce limits on video uploads from new accounts. IMT will trigger thresholds based on BB patterns. These limitations are partly for platform safety but without direct legal mapping.",
+            project_description:
+                "Introduce limits on video uploads from new accounts. IMT will trigger thresholds based on BB patterns. These limitations are partly for platform safety but without direct legal mapping.",
             project_type: "Web Application",
             priority: "Medium",
-            due_date: "2026-01-05"
+            due_date: "2026-01-05",
         });
     };
 
@@ -157,12 +158,24 @@ const SingleAnalysis = () => {
                                 className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
                             >
                                 <option value="">Select feature type</option>
-                                <option value="Web Application">Web Application</option>
-                                <option value="Mobile Application">Mobile Application</option>
-                                <option value="API Development">API Development</option>
-                                <option value="Data Processing">Data Processing</option>
-                                <option value="AI/ML Solution">AI/ML Solution</option>
-                                <option value="Infrastructure">Infrastructure</option>
+                                <option value="Web Application">
+                                    Web Application
+                                </option>
+                                <option value="Mobile Application">
+                                    Mobile Application
+                                </option>
+                                <option value="API Development">
+                                    API Development
+                                </option>
+                                <option value="Data Processing">
+                                    Data Processing
+                                </option>
+                                <option value="AI/ML Solution">
+                                    AI/ML Solution
+                                </option>
+                                <option value="Infrastructure">
+                                    Infrastructure
+                                </option>
                                 <option value="Other">Other</option>
                             </select>
                         </div>
@@ -210,7 +223,7 @@ const SingleAnalysis = () => {
                             <button
                                 type="button"
                                 onClick={handleDemoPopulate}
-                                className="w-full py-2 px-4 rounded-md font-medium bg-gray-200 hover:bg-gray-300 focus:outline-none focus:ring-2 focus:ring-gray-400 text-gray-700 transition-colors"
+                                className="w-full px-4 py-2 font-medium text-gray-700 transition-colors bg-gray-200 rounded-md hover:bg-gray-300 focus:outline-none focus:ring-2 focus:ring-gray-400"
                             >
                                 Demo Populate
                             </button>
@@ -224,7 +237,9 @@ const SingleAnalysis = () => {
                                         : "bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500"
                                 } text-white transition-colors`}
                             >
-                                {isAnalyzing ? "Analyzing..." : "Analyze Feature"}
+                                {isAnalyzing
+                                    ? "Analyzing..."
+                                    : "Analyze Feature"}
                             </button>
                         </div>
                     </form>
@@ -307,12 +322,26 @@ const SingleAnalysis = () => {
                                             <span className="text-sm font-medium text-blue-700">
                                                 Compliance Status:
                                             </span>
-                                            <p className={`text-lg font-semibold ${
-                                                result.result.compliance_status.risk_level === 'HIGH' ? 'text-red-600' :
-                                                result.result.compliance_status.risk_level === 'MEDIUM' ? 'text-yellow-600' :
-                                                'text-green-600'
-                                            }`}>
-                                                {result.result.compliance_status.overall_status?.replace(/_/g, " ").toLowerCase().replace(/\b\w/g, l => l.toUpperCase())}
+                                            <p
+                                                className={`text-lg font-semibold ${
+                                                    result.result
+                                                        .compliance_status
+                                                        .risk_level === "HIGH"
+                                                        ? "text-red-600"
+                                                        : result.result
+                                                              .compliance_status
+                                                              .risk_level ===
+                                                          "MEDIUM"
+                                                        ? "text-yellow-600"
+                                                        : "text-green-600"
+                                                }`}
+                                            >
+                                                {result.result.compliance_status.overall_status
+                                                    ?.replace(/_/g, " ")
+                                                    .toLowerCase()
+                                                    .replace(/\b\w/g, (l) =>
+                                                        l.toUpperCase()
+                                                    )}
                                             </p>
                                         </div>
                                     )}
@@ -321,12 +350,25 @@ const SingleAnalysis = () => {
                                             <span className="text-sm font-medium text-blue-700">
                                                 Risk Level:
                                             </span>
-                                            <span className={`inline-block px-2 py-1 ml-2 text-sm font-medium rounded-full ${
-                                                result.result.compliance_status.risk_level === 'HIGH' ? 'bg-red-100 text-red-800' :
-                                                result.result.compliance_status.risk_level === 'MEDIUM' ? 'bg-yellow-100 text-yellow-800' :
-                                                'bg-green-100 text-green-800'
-                                            }`}>
-                                                {result.result.compliance_status.risk_level}
+                                            <span
+                                                className={`inline-block px-2 py-1 ml-2 text-sm font-medium rounded-full ${
+                                                    result.result
+                                                        .compliance_status
+                                                        .risk_level === "HIGH"
+                                                        ? "bg-red-100 text-red-800"
+                                                        : result.result
+                                                              .compliance_status
+                                                              .risk_level ===
+                                                          "MEDIUM"
+                                                        ? "bg-yellow-100 text-yellow-800"
+                                                        : "bg-green-100 text-green-800"
+                                                }`}
+                                            >
+                                                {
+                                                    result.result
+                                                        .compliance_status
+                                                        .risk_level
+                                                }
                                             </span>
                                         </div>
                                     )}
@@ -758,12 +800,31 @@ const SingleAnalysis = () => {
                                                 <div className="space-y-3">
                                                     <div className="p-3 bg-white border border-gray-200 rounded">
                                                         <h6 className="mb-2 font-medium text-gray-900">
-                                                            {formData.project_name || 'Feature Name'}
+                                                            {formData.project_name ||
+                                                                "Feature Name"}
                                                         </h6>
                                                         <div className="space-y-1 text-sm text-gray-600">
-                                                            <p><strong>Type:</strong> {formData.project_type || 'Not specified'}</p>
-                                                            <p><strong>Priority:</strong> {formData.priority || 'Not specified'}</p>
-                                                            <p><strong>Due Date:</strong> {formData.due_date || 'Not specified'}</p>
+                                                            <p>
+                                                                <strong>
+                                                                    Type:
+                                                                </strong>{" "}
+                                                                {formData.project_type ||
+                                                                    "Not specified"}
+                                                            </p>
+                                                            <p>
+                                                                <strong>
+                                                                    Priority:
+                                                                </strong>{" "}
+                                                                {formData.priority ||
+                                                                    "Not specified"}
+                                                            </p>
+                                                            <p>
+                                                                <strong>
+                                                                    Due Date:
+                                                                </strong>{" "}
+                                                                {formData.due_date ||
+                                                                    "Not specified"}
+                                                            </p>
                                                         </div>
                                                     </div>
                                                 </div>
@@ -835,7 +896,8 @@ const SingleAnalysis = () => {
                                             {/* Compliance Matrix */}
                                             <div className="p-4 border border-gray-200 rounded-lg bg-gray-50">
                                                 <h5 className="mb-3 font-semibold text-gray-900">
-                                                    Feature Compliance Requirements
+                                                    Feature Compliance
+                                                    Requirements
                                                 </h5>
                                                 <div className="overflow-x-auto">
                                                     <table className="min-w-full divide-y divide-gray-200">
@@ -858,7 +920,9 @@ const SingleAnalysis = () => {
                                                         <tbody className="bg-white divide-y divide-gray-200">
                                                             <tr>
                                                                 <td className="px-4 py-2 text-sm font-medium text-gray-900 whitespace-nowrap">
-                                                                    Privacy Policy Compliance
+                                                                    Privacy
+                                                                    Policy
+                                                                    Compliance
                                                                 </td>
                                                                 <td className="px-4 py-2 text-sm text-gray-600 whitespace-nowrap">
                                                                     Legal
@@ -867,14 +931,16 @@ const SingleAnalysis = () => {
                                                                     Required
                                                                 </td>
                                                                 <td className="px-4 py-2 whitespace-nowrap">
-                                                                    <span className="inline-flex px-2 py-1 text-xs font-semibold rounded-full bg-red-100 text-red-800">
+                                                                    <span className="inline-flex px-2 py-1 text-xs font-semibold text-red-800 bg-red-100 rounded-full">
                                                                         High
                                                                     </span>
                                                                 </td>
                                                             </tr>
                                                             <tr>
                                                                 <td className="px-4 py-2 text-sm font-medium text-gray-900 whitespace-nowrap">
-                                                                    Data Protection Measures
+                                                                    Data
+                                                                    Protection
+                                                                    Measures
                                                                 </td>
                                                                 <td className="px-4 py-2 text-sm text-gray-600 whitespace-nowrap">
                                                                     Security
@@ -883,14 +949,15 @@ const SingleAnalysis = () => {
                                                                     Required
                                                                 </td>
                                                                 <td className="px-4 py-2 whitespace-nowrap">
-                                                                    <span className="inline-flex px-2 py-1 text-xs font-semibold rounded-full bg-yellow-100 text-yellow-800">
+                                                                    <span className="inline-flex px-2 py-1 text-xs font-semibold text-yellow-800 bg-yellow-100 rounded-full">
                                                                         Medium
                                                                     </span>
                                                                 </td>
                                                             </tr>
                                                             <tr>
                                                                 <td className="px-4 py-2 text-sm font-medium text-gray-900 whitespace-nowrap">
-                                                                    User Consent Management
+                                                                    User Consent
+                                                                    Management
                                                                 </td>
                                                                 <td className="px-4 py-2 text-sm text-gray-600 whitespace-nowrap">
                                                                     Legal
@@ -899,7 +966,7 @@ const SingleAnalysis = () => {
                                                                     Recommended
                                                                 </td>
                                                                 <td className="px-4 py-2 whitespace-nowrap">
-                                                                    <span className="inline-flex px-2 py-1 text-xs font-semibold rounded-full bg-green-100 text-green-800">
+                                                                    <span className="inline-flex px-2 py-1 text-xs font-semibold text-green-800 bg-green-100 rounded-full">
                                                                         Low
                                                                     </span>
                                                                 </td>

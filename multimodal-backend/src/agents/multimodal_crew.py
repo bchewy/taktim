@@ -454,7 +454,7 @@ class ChatAgent:
     
     def __init__(self):
         self.llm = ChatOpenAI(
-            model="gpt-4o",
+            model="gpt-4o-mini-2024-07-18",
             temperature=0.3,
             api_key=os.getenv("OPENAI_API_KEY")
         )
