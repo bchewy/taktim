@@ -1,27 +1,30 @@
 #!/usr/bin/env python3
 """
-LangChain RAG System for Legal Document Analysis
-Modern LangChain implementation following official tutorials
+Simplified RAG System for Legal Document Analysis
+Using Chroma vector store and OpenAI for local, simplified operation
 """
 
 import os
 import asyncio
 import hashlib
 import json
+import sqlite3
+from datetime import datetime
+from pathlib import Path
 from typing import List, Dict, Any, Optional
 from dataclasses import dataclass
 
-# LangChain imports (updated for current version)
+# LangChain imports
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_openai import OpenAIEmbeddings, ChatOpenAI
-from langchain_pinecone import PineconeVectorStore
+from langchain_chroma import Chroma
 from langchain_core.documents import Document
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.runnables import RunnablePassthrough
 from langchain_core.output_parsers import StrOutputParser
 
-# Pinecone
-from pinecone import Pinecone
+# Chroma
+import chromadb
 
 # Web scraping
 import requests
@@ -31,14 +34,13 @@ from urllib.parse import urljoin, urlparse
 from pydantic_settings import BaseSettings
 
 
-class LangChainRAGSettings(BaseSettings):
+class SimplifiedRAGSettings(BaseSettings):
     openai_api_key: str = ""
-    pinecone_api_key: str = ""
-    chunk_size: int = 500  # Reduced chunk size for large documents
-    chunk_overlap: int = 50  # Reduced overlap
+    chunk_size: int = 500
+    chunk_overlap: int = 50
     retrieval_k: int = 6
-    pinecone_environment: str = "us-east-1-aws"
-    pinecone_index_name: str = "legal-compliance-docs"
+    chroma_persist_directory: str = "data/chroma_db"
+    database_path: str = "data/analysis.db"
     
     model_config = {"env_file": ".env", "extra": "ignore"}
 
@@ -145,59 +147,66 @@ class LegalDocumentScraper:
         return docs
 
 
-class LangChainRAGSystem:
-    """Modern LangChain-based RAG system for legal document analysis"""
+class SimplifiedRAGSystem:
+    """Simplified RAG system using Chroma and OpenAI"""
     
-    def __init__(self, settings: Optional[LangChainRAGSettings] = None):
-        self.settings = settings or LangChainRAGSettings()
+    def __init__(self, settings: Optional[SimplifiedRAGSettings] = None):
+        self.settings = settings or SimplifiedRAGSettings()
         
         if not self.settings.openai_api_key:
-            raise ValueError("OPENAI_API_KEY is required for LangChain RAG")
+            raise ValueError("OPENAI_API_KEY is required")
         
-        if not self.settings.pinecone_api_key:
-            raise ValueError("PINECONE_API_KEY is required for Pinecone vector store")
-        
-        # Set API keys
+        # Set API key
         os.environ["OPENAI_API_KEY"] = self.settings.openai_api_key
-        os.environ["PINECONE_API_KEY"] = self.settings.pinecone_api_key
-        
-        # Initialize Pinecone
-        self.pc = Pinecone(api_key=self.settings.pinecone_api_key)
         
         # Initialize components
-        self.embeddings = OpenAIEmbeddings()
+        self.embeddings = OpenAIEmbeddings(model="text-embedding-3-small")  # Cheaper option
         self.text_splitter = RecursiveCharacterTextSplitter(
             chunk_size=self.settings.chunk_size,
             chunk_overlap=self.settings.chunk_overlap,
             separators=["\n\n", "\n", ". ", " ", ""]
         )
         
-        # Initialize vector store
-        self.vectorstore = None
+        # Initialize Chroma vector store
+        Path(self.settings.chroma_persist_directory).mkdir(parents=True, exist_ok=True)
+        self.vectorstore = Chroma(
+            persist_directory=self.settings.chroma_persist_directory,
+            embedding_function=self.embeddings,
+            collection_name="legal_documents"
+        )
+        
+        # Initialize other components
         self.retriever = None
         self.rag_chain = None
         self.scraper = LegalDocumentScraper()
+        self._init_database()
         
-        print("✅ LangChain RAG system initialized with Pinecone")
+        print(f"✅ Simplified RAG system initialized - {self.vectorstore._collection.count()} documents in store")
+    
+    def _init_database(self):
+        """Initialize SQLite database for analysis storage"""
+        Path(self.settings.database_path).parent.mkdir(parents=True, exist_ok=True)
+        
+        with sqlite3.connect(self.settings.database_path) as conn:
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS analyses (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    feature_id TEXT NOT NULL,
+                    needs_compliance BOOLEAN NOT NULL,
+                    confidence REAL NOT NULL,
+                    reasoning TEXT NOT NULL,
+                    regulations TEXT,  -- JSON array
+                    signals TEXT,     -- JSON array
+                    citations TEXT,   -- JSON array
+                    created_at TEXT NOT NULL,
+                    session_id TEXT
+                )
+            """)
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_analyses_feature ON analyses(feature_id)")
     
     def _initialize_existing_retriever(self):
-        """Initialize retriever to connect to existing Pinecone index without adding documents"""
-        index_name = self.settings.pinecone_index_name
-        
-        # Check if index exists
-        if index_name not in [idx.name for idx in self.pc.list_indexes()]:
-            raise ValueError(f"Pinecone index '{index_name}' does not exist")
-        
-        print(f"🔗 Connecting to existing Pinecone index: {index_name}")
-        
-        # Initialize vector store connection
-        self.vectorstore = PineconeVectorStore(
-            index_name=index_name,
-            embedding=self.embeddings,
-            pinecone_api_key=self.settings.pinecone_api_key
-        )
-        
-        # Create retriever
+        """Initialize retriever from existing Chroma collection"""
+        # Create retriever from existing vector store
         self.retriever = self.vectorstore.as_retriever(
             search_kwargs={"k": self.settings.retrieval_k}
         )
@@ -205,7 +214,7 @@ class LangChainRAGSystem:
         # Setup RAG chain
         self._setup_rag_chain()
         
-        print(f"✅ Connected to existing Pinecone vector store")
+        print(f"✅ Connected to existing Chroma vector store")
     
     def _generate_doc_hash(self, doc: Document) -> str:
         """Generate a unique hash for a document based on its content and metadata"""
@@ -229,85 +238,34 @@ class LangChainRAGSystem:
             return False
     
     def _setup_retriever(self, docs: List[Document], force_refresh: bool = False, skip_indexing: bool = False):
-        """Setup Pinecone vector store and retriever"""
+        """Setup Chroma vector store and retriever"""
         try:
-            # Create or get Pinecone index
-            index_name = self.settings.pinecone_index_name
-            
-            # Check if index exists, create if not
-            if index_name not in [idx.name for idx in self.pc.list_indexes()]:
-                print(f"📦 Creating Pinecone index: {index_name}")
-                self.pc.create_index(
-                    name=index_name,
-                    dimension=1536,  # OpenAI embeddings dimension
-                    metric="cosine",
-                    spec={
-                        "serverless": {
-                            "cloud": "aws",
-                            "region": "us-east-1"
-                        }
-                    }
-                )
-                print("✅ Index created successfully")
-            else:
-                print(f"📦 Using existing Pinecone index: {index_name}")
-            
-            # Initialize vector store
-            self.vectorstore = PineconeVectorStore(
-                index_name=index_name,
-                embedding=self.embeddings,
-                pinecone_api_key=self.settings.pinecone_api_key
-            )
             
             if skip_indexing:
                 print("⏭️  Skipping indexing - using existing vector store content only")
                 total_added = 0
             else:
-                # Filter out existing documents if not forcing refresh
-                docs_to_add = []
+                # Simple approach: add documents if they don't exist
                 if force_refresh:
-                    print("🔄 Force refresh enabled - will re-index all documents")
-                    # Add hashes to all docs for tracking
-                    for doc in docs:
-                        doc.metadata["doc_hash"] = self._generate_doc_hash(doc)
+                    print("🔄 Force refresh enabled - clearing and re-indexing all documents")
+                    # Clear existing collection
+                    self.vectorstore._collection.delete()
                     docs_to_add = docs
                 else:
-                    print("🔍 Checking for existing documents...")
-                    existing_hashes = set()
-                    new_docs = 0
-                    
-                    # First, get all existing hashes by querying the vector store
-                    try:
-                        # Query for some existing docs to see what hashes we have
-                        existing_docs = self.vectorstore.similarity_search(
-                            query="regulation law", 
-                            k=1000,  # Get a large sample to check hashes
-                            filter={"doc_hash": {"$exists": True}}
-                        )
-                        existing_hashes = {doc.metadata.get("doc_hash") for doc in existing_docs if doc.metadata.get("doc_hash")}
-                        print(f"   📋 Found {len(existing_hashes)} existing document hashes in vector store")
-                    except Exception as e:
-                        print(f"   ⚠️  Could not query existing docs: {e} - will index all")
-                        existing_hashes = set()
-                    
-                    # Check each document
-                    for doc in docs:
-                        doc_hash = self._generate_doc_hash(doc)
-                        doc.metadata["doc_hash"] = doc_hash
-                        
-                        if doc_hash not in existing_hashes:
-                            docs_to_add.append(doc)
-                            new_docs += 1
-                    
-                    print(f"📝 {new_docs} new documents to index, {len(docs) - new_docs} already exist")
+                    print("🔍 Adding new documents to existing collection...")
+                    docs_to_add = docs  # Chroma handles duplicates internally
                 
-                # Add documents in batches to avoid token limits
+                # Add documents in batches
                 batch_size = 20
                 total_added = 0
                 
                 for i in range(0, len(docs_to_add), batch_size):
                     batch = docs_to_add[i:i+batch_size]
                     try:
+                        # Add document hash to metadata for deduplication
+                        for doc in batch:
+                            doc.metadata["doc_hash"] = self._generate_doc_hash(doc)
+                        
                         self.vectorstore.add_documents(batch)
                         total_added += len(batch)
                         print(f"   ✅ Added batch {i//batch_size + 1}/{(len(docs_to_add)-1)//batch_size + 1} ({len(batch)} documents)")
@@ -323,10 +281,10 @@ class LangChainRAGSystem:
             # Setup RAG chain
             self._setup_rag_chain()
             
-            print(f"🔧 Setup Pinecone retriever with {total_added} documents indexed")
+            print(f"🔧 Setup Chroma retriever with {total_added} documents indexed")
             
         except Exception as e:
-            print(f"❌ Failed to setup Pinecone retriever: {e}")
+            print(f"❌ Failed to setup Chroma retriever: {e}")
             raise
     
     def _setup_rag_chain(self):
@@ -346,25 +304,14 @@ Answer:"""
         
         prompt = ChatPromptTemplate.from_template(template)
         
-        # Create the RAG chain with fallback model
-        try:
-            print(f"🔧 Trying GPT-5 model...")
-            llm = ChatOpenAI(
-                model="gpt-5-2025-08-07", 
-                temperature=0, 
-                request_timeout=60,  # Increased timeout for GPT-5
-                max_retries=2
-            )
-            model_name = "gpt-5-2025-08-07"
-        except Exception as e:
-            print(f"⚠️  GPT-5 setup failed ({e}), falling back to GPT-4o")
-            llm = ChatOpenAI(
-                model="gpt-4o", 
-                temperature=0, 
-                request_timeout=45,
-                max_retries=2
-            )
-            model_name = "gpt-4o"
+        # Use GPT-4o-mini for faster, cheaper analysis
+        llm = ChatOpenAI(
+            model="gpt-4o-mini", 
+            temperature=0, 
+            request_timeout=30,
+            max_retries=2
+        )
+        model_name = "gpt-4o-mini"
         
         def format_docs(docs):
             print(f"📄 Formatting {len(docs)} retrieved documents")
@@ -605,37 +552,29 @@ Answer:"""
         return 0 if skip_indexing else len(chunks)
     
     async def index_regulation_from_search_apis(self, regulation_name: str, jurisdiction: str, 
-                                                perplexity_client=None, exa_client=None, force_refresh: bool = False, skip_indexing: bool = False) -> int:
+                                                search_clients: List[Any] = None, force_refresh: bool = False, skip_indexing: bool = False) -> int:
         """Index a regulation by first finding URLs, then scraping full content"""
         all_scraped_docs = []
         
-        # Get URLs from Perplexity
-        if perplexity_client:
-            try:
-                perplexity_result = await perplexity_client.search_regulation(regulation_name, jurisdiction)
-                if perplexity_result.official_sites:
-                    print(f"🔍 Perplexity found {len(perplexity_result.official_sites)} official sites")
-                    scraped = await self.scraper.scrape_urls(
-                        perplexity_result.official_sites[:5],  # Limit to top 5
-                        regulation_name, jurisdiction, "perplexity"
-                    )
-                    all_scraped_docs.extend(scraped)
-            except Exception as e:
-                print(f"⚠️  Perplexity search failed: {e}")
+        if not search_clients:
+            print("⚠️  No search clients provided")
+            return 0
         
-        # Get URLs from Exa
-        if exa_client:
+        # Get URLs from all available search clients
+        for client in search_clients:
             try:
-                exa_result = await exa_client.search_regulation(regulation_name, jurisdiction)
-                if exa_result.official_sites:
-                    print(f"🔍 Exa found {len(exa_result.official_sites)} official sites")
-                    scraped = await self.scraper.scrape_urls(
-                        exa_result.official_sites[:10],  # Exa typically finds more
-                        regulation_name, jurisdiction, "exa"
-                    )
-                    all_scraped_docs.extend(scraped)
+                if hasattr(client, 'search_regulation'):
+                    result = await client.search_regulation(regulation_name, jurisdiction)
+                    if hasattr(result, 'official_sites') and result.official_sites:
+                        client_name = type(client).__name__
+                        print(f"🔍 {client_name} found {len(result.official_sites)} official sites")
+                        scraped = await self.scraper.scrape_urls(
+                            result.official_sites[:8],  # Limit per client
+                            regulation_name, jurisdiction, client_name.lower()
+                        )
+                        all_scraped_docs.extend(scraped)
             except Exception as e:
-                print(f"⚠️  Exa search failed: {e}")
+                print(f"⚠️  Search client failed: {e}")
         
         # Index the scraped documents
         if all_scraped_docs:
@@ -914,18 +853,37 @@ AGAINST compliance: {', '.join(counter_points[:3]) if counter_points else 'none'
         except Exception as e:
             return {
                 "signals": list(set(finder_signals + missing_signals)),
-                "notes": f"LangChain RAG analysis failed: {str(e)}",
+                "notes": f"RAG analysis failed: {str(e)}",
                 "confidence": 0.0,
                 "error": str(e)
             }
+    
+    def store_analysis(self, feature_id: str, needs_compliance: bool, confidence: float, 
+                      reasoning: str, regulations: List[str], signals: List[str], 
+                      citations: List[str], session_id: Optional[str] = None) -> int:
+        """Store analysis result in database"""
+        import json
+        
+        with sqlite3.connect(self.settings.database_path) as conn:
+            cursor = conn.cursor()
+            cursor.execute("""
+                INSERT INTO analyses 
+                (feature_id, needs_compliance, confidence, reasoning, regulations, signals, citations, created_at, session_id)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """, (
+                feature_id, needs_compliance, confidence, reasoning, 
+                json.dumps(regulations), json.dumps(signals), json.dumps(citations),
+                datetime.now().isoformat(), session_id
+            ))
+            return cursor.lastrowid
 
 
 # Integration with existing system
 async def create_enhanced_rag_system(regulations: List[Dict[str, str]], 
-                                   perplexity_client=None, exa_client=None) -> LangChainRAGSystem:
-    """Create and populate a LangChain RAG system with legal documents"""
+                                   search_clients: List[Any] = None) -> SimplifiedRAGSystem:
+    """Create and populate a simplified RAG system with legal documents"""
     
-    rag = LangChainRAGSystem()
+    rag = SimplifiedRAGSystem()
     
     total_indexed = 0
     for regulation in regulations:
@@ -935,11 +893,11 @@ async def create_enhanced_rag_system(regulations: List[Dict[str, str]],
         if name:
             print(f"\n📋 Processing: {name} ({jurisdiction})")
             count = await rag.index_regulation_from_search_apis(
-                name, jurisdiction, perplexity_client, exa_client
+                name, jurisdiction, search_clients
             )
             total_indexed += count
     
-    print(f"\n✅ LangChain RAG setup complete: {total_indexed} total chunks indexed")
+    print(f"\n✅ Simplified RAG setup complete: {total_indexed} total chunks indexed")
     return rag
 
 

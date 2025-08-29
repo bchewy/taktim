@@ -1,0 +1,34 @@
+# Sample regulations for compliance analysis
+regulations:
+  - name: "EU Digital Services Act"
+    jurisdiction: "EU"
+  - name: "California SB976"
+    jurisdiction: "California"
+  - name: "COPPA"
+    jurisdiction: "United States"
+
+# Sample test features for analysis
+test_features:
+  - feature_id: "recommender_system_1"
+    title: "Personalized Content Feed"
+    description: "AI-powered recommendation engine that personalizes content based on user behavior, demographics, and preferences. Tracks engagement metrics and uses machine learning to optimize content ranking."
+    tags: ["personalization", "recommendation", "ai"]
+    code_hints: ["recommendation_engine.py", "user_profiling.js", "content_ranking_algorithm"]
+    expected_compliance: true
+    expected_regulations: ["EU Digital Services Act"]
+  
+  - feature_id: "chat_system_1"
+    title: "User Chat Messaging"
+    description: "Basic peer-to-peer messaging system allowing users to send text messages to each other. No content moderation or filtering."
+    tags: ["messaging", "communication"]
+    code_hints: ["chat_handler.py", "message_router.js"]
+    expected_compliance: false
+    expected_regulations: []
+
+  - feature_id: "youth_targeted_ads_1"
+    title: "Targeted Advertising for Teens"
+    description: "Advertising system that targets users aged 13-17 with personalized ads based on their interests, location, and browsing history."
+    tags: ["advertising", "targeting", "minors"]
+    code_hints: ["ad_targeting.py", "user_demographics.js", "age_verification"]
+    expected_compliance: true
+    expected_regulations: ["California SB976", "COPPA"]

@@ -1,0 +1,32 @@
+# Simple rules engine for compliance detection
+# These rules complement the RAG-based analysis
+
+rules:
+  - id: "minors_protection"
+    verdict: true
+    reason: "Features targeting minors require compliance with child protection laws"
+    regulations: ["COPPA", "California SB976"]
+    when_any:
+      tags: ["minors", "children", "teens", "youth"]
+      text: ["under 18", "minors", "children", "teens", "youth protection"]
+
+  - id: "personalized_ads"
+    verdict: true
+    reason: "Personalized advertising may require disclosure and opt-out mechanisms"
+    regulations: ["EU Digital Services Act", "California SB976"]
+    when_all_text: ["advertising", "personalized"]
+
+  - id: "recommendation_systems"
+    verdict: true
+    reason: "Recommendation systems require transparency under EU Digital Services Act"
+    regulations: ["EU Digital Services Act"]
+    when_any:
+      tags: ["recommendation", "personalization", "ranking"]
+      text: ["recommendation", "personalized feed", "content ranking", "algorithmic curation"]
+
+  - id: "basic_messaging"
+    verdict: false
+    reason: "Basic messaging without targeting or profiling typically doesn't trigger compliance requirements"
+    regulations: []
+    when_any_text: ["messaging", "chat", "communication"]
+    and_text: []
