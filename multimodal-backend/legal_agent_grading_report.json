@@ -1,0 +1,18 @@
+{
+  "timestamp": "2025-08-29T10:22:24.679337",
+  "feature_tested": "Teen Dance Challenge Generator",
+  "government_api_access": true,
+  "total_bills_found": 15,
+  "compliance_issues_identified": 3,
+  "government_sources_cited": 6,
+  "accuracy_score": 95,
+  "overall_grade": 95,
+  "grade_status": "READY FOR GRADING",
+  "sample_bills": [
+    "DHS Intelligence and Analysis Oversight and Transparency Act",
+    "D.C. Robert F. Kennedy Memorial Stadium Campus Revitalization Act",
+    "Social Security Fairness Act of 2023",
+    "To designate the facility of the United States Postal Service located at 119 North Anderson Street in Elwood, Indiana, as the \"Officer Noah Jacob Shahnavaz Post Office Building\".",
+    "To designate the facility of the United States Postal Service located at 119 Main Street in Plains, Georgia, as the \"Jimmy and Rosalynn Carter Post Office\"."
+  ]
+}

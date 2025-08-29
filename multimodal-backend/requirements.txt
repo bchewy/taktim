@@ -29,6 +29,9 @@ numpy>=1.24.0
 httpx>=0.25.0
 aiofiles>=23.0.0
 
+# Legal API integrations
+requests>=2.31.0
+
 # Environment and configuration
 python-dotenv>=1.0.0
 pydantic>=2.6.0
