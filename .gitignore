@@ -4,3 +4,4 @@ data
 .DS_Store
 *.zip
 frontend/node_modules/*
+node_modules/
