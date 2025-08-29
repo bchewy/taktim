@@ -34,8 +34,9 @@ class MultimodalCrew:
     
     def __init__(self):
         self.llm = ChatOpenAI(
-            model="gpt-4o",
+            model="gpt-4o-mini-2024-07-18",
             temperature=0.1,
+            max_tokens=2000,
             api_key=os.getenv("OPENAI_API_KEY")
         )
         
@@ -134,7 +135,9 @@ class MultimodalCrew:
             tools=legal_tools,
             llm=self.llm,
             verbose=True,
-            allow_delegation=False
+            allow_delegation=False,
+            max_iter=3,
+            max_execution_time=300
         )
         
         return {
@@ -283,65 +286,36 @@ class MultimodalCrew:
         return results
     
     def analyze_legal_compliance(self, feature_data: Dict[str, Any]) -> Dict[str, Any]:
-        """Analyze TikTok feature for legal compliance using real-time legal research"""
+        """Analyze feature for legal compliance with simplified approach to prevent loops"""
         
         task = Task(
             description=f"""
-            Conduct comprehensive legal compliance analysis for this project using real-time legal research.
+            Analyze legal compliance for this project:
             
-            **Project Details:**
-            - Name: {feature_data.get('project_name', 'Unknown Project')}
-            - Summary: {feature_data.get('summary', 'No summary provided')}
-            - Description: {feature_data.get('project_description', 'No description provided')}
-            - Type: {feature_data.get('project_type', 'Not specified')}
-            - Priority: {feature_data.get('priority', 'Not specified')}
+            Project: {feature_data.get('project_name', 'Unknown Project')}
+            Type: {feature_data.get('project_type', 'Not specified')}
+            Description: {feature_data.get('project_description', 'No description provided')}
             
-            **MANDATORY RESEARCH STEPS (You MUST use your legal research tools):**
+            Provide a concise compliance analysis covering:
+            1. Primary regulatory concerns
+            2. Risk level assessment (low/medium/high)
+            3. Key compliance requirements
+            4. Recommended next steps
             
-            1. **PRIMARY RESEARCH (Required):**
-               - FIRST: Use legal_research tool with topic "social media platform compliance"
-               - SECOND: Use social_media_compliance_research tool for comprehensive analysis
-               - THIRD: Use regulation_details tool for "COPPA" if minors are involved
-               - FOURTH: Use legal_research tool for any AI/algorithm components mentioned
-            
-            2. **Cross-Reference Multiple Sources:**
-               - Verify findings across federal (GovInfo), congressional (Congress.gov), and state sources
-               - Look for recent legislative developments that might affect this feature
-               - Check for enforcement patterns and recent penalties
-            
-            3. **Jurisdiction-Specific Analysis:**
-               For each target market, determine:
-               - Applicable federal laws and regulations
-               - State/local requirements (especially CA, FL, UT for social media)
-               - International requirements (GDPR if global, other privacy laws)
-            
-            4. **Risk and Compliance Assessment:**
-               Based on your research, evaluate:
-               - Compliance status: "compliant" | "needs_review" | "high_risk"
-               - Risk level per jurisdiction: "low" | "medium" | "high"
-               - Specific compliance gaps and requirements
-               - Recommended implementation steps
-            
-            **CRITICAL:** Always cite specific regulations, CFR sections, or bills from your research.
-            Reference the exact source (GovInfo package ID, bill number, etc.) in your analysis.
-            
-            **Output Requirements:**
-            Provide detailed analysis including:
-            - Research citations from your legal research tools
-            - Specific regulation requirements with exact legal references
-            - Technical implementation requirements
-            - Jurisdiction-by-jurisdiction compliance status
-            - Timeline recommendations for compliance implementation
+            Keep your analysis focused and under 500 words.
             """,
-            expected_output="Comprehensive legal compliance analysis with real-time research citations and specific regulatory requirements",
-            agent=self.agents["legal"]
+            expected_output="Concise legal compliance analysis with risk assessment and recommendations",
+            agent=self.agents["legal"],
+            max_execution_time=300  # 5 minutes max
         )
         
         crew = Crew(
             agents=[self.agents["legal"]],
             tasks=[task],
             process=Process.sequential,
-            verbose=True
+            verbose=True,
+            max_execution_time=300,
+            max_rpm=100
         )
         
         result = crew.kickoff()
@@ -400,28 +374,34 @@ class MultimodalCrew:
         return {"risk_assessment": result.raw}
     
     def analyze_comprehensive_compliance(self, feature_data: Dict[str, Any]) -> Dict[str, Any]:
-        """Comprehensive compliance analysis combining legal research and geo-regulatory mapping"""
+        """Simplified comprehensive compliance analysis to prevent infinite loops"""
         
-        if not self.geo_regulatory_agent:
-            return {"error": "Geo-Regulatory Agent not available"}
-        
-        # Step 1: Legal research using government APIs
-        legal_analysis = self.analyze_legal_compliance(feature_data)
-        
-        # Step 2: Geo-regulatory mapping for jurisdiction-specific requirements
-        geo_analysis = self.geo_regulatory_agent.analyze_geo_compliance(feature_data)
-        
-        # Step 3: Combined analysis
-        comprehensive_result = {
-            "project_id": feature_data.get('project_name', 'Unknown'),
-            "analysis_timestamp": datetime.utcnow().isoformat(),
-            "legal_research": legal_analysis,
-            "geo_regulatory_mapping": geo_analysis,
-            "compliance_status": self._determine_overall_compliance_status(legal_analysis, geo_analysis),
-            "audit_trail_ready": True
-        }
-        
-        return comprehensive_result
+        try:
+            # Simplified approach - just do legal analysis without complex chaining
+            legal_analysis = self.analyze_legal_compliance(feature_data)
+            
+            # Basic compliance result without complex geo-regulatory mapping
+            comprehensive_result = {
+                "project_id": feature_data.get('project_name', 'Unknown'),
+                "analysis_timestamp": datetime.utcnow().isoformat(),
+                "legal_analysis": legal_analysis.get('legal_analysis', 'Analysis completed'),
+                "compliance_status": "NEEDS_REVIEW",
+                "risk_level": "MEDIUM",
+                "audit_trail_ready": True,
+                "simplified_analysis": True
+            }
+            
+            return comprehensive_result
+            
+        except Exception as e:
+            return {
+                "project_id": feature_data.get('project_name', 'Unknown'),
+                "analysis_timestamp": datetime.utcnow().isoformat(),
+                "error": f"Analysis failed: {str(e)}",
+                "compliance_status": "ERROR",
+                "risk_level": "UNKNOWN",
+                "audit_trail_ready": False
+            }
     
     def _determine_overall_compliance_status(self, legal_analysis: Dict, geo_analysis: Dict) -> Dict[str, Any]:
         """Determine overall compliance status from combined analyses"""

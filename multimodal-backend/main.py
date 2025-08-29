@@ -10,6 +10,8 @@ from datetime import datetime
 from pathlib import Path
 from typing import Dict, List, Optional, Any
 import json
+import csv
+import io
 
 from fastapi import FastAPI, File, UploadFile, HTTPException, BackgroundTasks, Form
 from fastapi.middleware.cors import CORSMiddleware
@@ -521,6 +523,119 @@ async def generate_audit_trail(feature: ProjectAnalysis):
         
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Audit trail generation failed: {str(e)}")
+
+
+@app.post("/api/bulk-csv-analysis")
+async def bulk_csv_analysis(background_tasks: BackgroundTasks, file: UploadFile = File(...)):
+    """Bulk analysis from CSV file upload"""
+    try:
+        # Validate file type
+        if not file.filename.endswith('.csv'):
+            raise HTTPException(status_code=400, detail="Only CSV files are allowed")
+        
+        # Read CSV content
+        content = await file.read()
+        csv_string = content.decode('utf-8')
+        csv_reader = csv.DictReader(io.StringIO(csv_string))
+        
+        # Convert CSV rows to analysis tasks
+        tasks = []
+        for row in csv_reader:
+            # Map CSV columns to our ProjectAnalysis structure
+            task = {
+                "project_name": row.get('Summary', ''),
+                "summary": f"{row.get('Issue Type', '')} - {row.get('Summary', '')}",
+                "project_description": f"Issue: {row.get('Issue key', '')} - {row.get('Summary', '')}. Priority: {row.get('Priority', '')}. Status: {row.get('Status', '')}",
+                "project_type": row.get('Issue Type', ''),
+                "priority": row.get('Priority', ''),
+                "due_date": row.get('Due date', ''),
+            }
+            
+            # Only include tasks with meaningful content
+            if task["project_name"]:
+                tasks.append(task)
+        
+        if not tasks:
+            raise HTTPException(status_code=400, detail="No valid tasks found in CSV")
+        
+        # Generate task ID for bulk operation
+        task_id = generate_task_id()
+        
+        # Initialize bulk task status
+        task_results[task_id] = {
+            "task_id": task_id,
+            "status": "pending",
+            "created_at": datetime.utcnow(),
+            "task_type": "bulk_csv_analysis",
+            "total_items": len(tasks),
+            "completed_items": 0,
+            "results": []
+        }
+        
+        # Start background bulk analysis
+        background_tasks.add_task(
+            run_bulk_csv_analysis_task,
+            task_id=task_id,
+            tasks=tasks
+        )
+        
+        return {
+            "task_id": task_id,
+            "status": "pending",
+            "message": f"Bulk CSV analysis started for {len(tasks)} items",
+            "total_items": len(tasks)
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"CSV bulk analysis failed: {str(e)}")
+
+
+async def run_bulk_csv_analysis_task(task_id: str, tasks: List[Dict]):
+    """Background task for running bulk CSV analysis"""
+    try:
+        task_results[task_id]["status"] = "running"
+        results = []
+        
+        for i, task in enumerate(tasks):
+            try:
+                # Run comprehensive analysis on each task
+                result = multimodal_crew.analyze_comprehensive_compliance(task)
+                
+                results.append({
+                    "feature_name": task["project_name"],
+                    "analysis_result": result,
+                    "timestamp": datetime.utcnow().isoformat(),
+                    "success": True
+                })
+                
+                # Update progress
+                task_results[task_id]["completed_items"] = i + 1
+                
+            except Exception as e:
+                results.append({
+                    "feature_name": task["project_name"],
+                    "error": str(e),
+                    "timestamp": datetime.utcnow().isoformat(),
+                    "success": False
+                })
+        
+        # Mark as completed
+        task_results[task_id].update({
+            "status": "completed",
+            "completed_at": datetime.utcnow(),
+            "results": results,
+            "success_count": len([r for r in results if r["success"]]),
+            "failure_count": len([r for r in results if not r["success"]])
+        })
+        
+    except Exception as e:
+        task_results[task_id].update({
+            "status": "failed",
+            "completed_at": datetime.utcnow(),
+            "error": str(e)
+        })
 
 
 if __name__ == "__main__":
