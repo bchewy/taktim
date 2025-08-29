@@ -1,5 +1,5 @@
 # Multi-stage build for GeoGov Lite compliance analysis system
-FROM python:3.10-slim as builder
+FROM python:3.10-slim AS builder
 
 # Set environment variables
 ENV PYTHONDONTWRITEBYTECODE=1 \
@@ -50,7 +50,6 @@ COPY --from=builder /usr/local/bin /usr/local/bin
 COPY main.py .
 COPY perplexity.py .
 COPY exa_sdk.py .
-COPY exa.py .
 COPY run_analysis.py .
 COPY langchain_rag.py .
 

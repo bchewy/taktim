@@ -1,18 +1,14 @@
-version: '3.8'
-
 services:
-  geogov-lite:
-    build: .
+  backend:
+    build: ./backend
+    container_name: geogov-backend
     ports:
       - "8000:8000"
     environment:
       # API Keys - set these in your .env file or environment
       - OPENAI_API_KEY=${OPENAI_API_KEY}
-      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
-      - FIRECRAWL_API_KEY=${FIRECRAWL_API_KEY}
-      - EXA_API_KEY=${EXA_API_KEY}
-      - PERPLEXITY_API_KEY=${PERPLEXITY_API_KEY}
-      - PINECONE_API_KEY=${PINECONE_API_KEY}
+      - EXA_API_KEY=${EXA_API_KEY:-}
+      - PERPLEXITY_API_KEY=${PERPLEXITY_API_KEY:-}
       
       # System Configuration
       - RAG_TOPK=6
@@ -20,12 +16,16 @@ services:
       - USE_RULES_ENGINE=false
       - SKIP_INDEXING=false
       - SKIP_SCRAPING=false
+      - USE_RAG=true
+      - LLM_TIMEOUT=10
+      - CHROMA_PERSIST_DIRECTORY=/app/data/chroma_db
+      - DATABASE_PATH=/app/data/analysis.db
     volumes:
       # Mount data directory for persistent storage
-      - ./data:/app/data
+      - backend_data:/app/data
       # Mount configuration files
-      - ./rules.yaml:/app/rules.yaml:ro
-      - ./inputs.yaml:/app/inputs.yaml:ro
+      - ./backend/rules.yaml:/app/rules.yaml:ro
+      - ./backend/inputs.yaml:/app/inputs.yaml:ro
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/api/health"]
       interval: 30s
@@ -33,16 +33,26 @@ services:
       retries: 3
       start_period: 40s
     restart: unless-stopped
-    
-  # Optional: Redis for caching (if needed in future)
-  # redis:
-  #   image: redis:7-alpine
-  #   ports:
-  #     - "6379:6379"
-  #   volumes:
-  #     - redis_data:/data
-  #   restart: unless-stopped
+    networks:
+      - geogov-network
+
+  frontend:
+    build: ./frontend
+    container_name: geogov-frontend
+    ports:
+      - "3000:80"
+    depends_on:
+      - backend
+    environment:
+      - VITE_API_BASE_URL=http://localhost:8000
+    restart: unless-stopped
+    networks:
+      - geogov-network
 
 volumes:
-  # redis_data:
-  data_volume:
+  backend_data:
+    driver: local
+
+networks:
+  geogov-network:
+    driver: bridge

@@ -32,13 +32,13 @@ from tenacity import retry, stop_after_attempt, wait_exponential
 # OpenAI API for LLM integration
 from openai import AsyncOpenAI
 
-# LangChain RAG system
+# Simplified RAG system
 try:
-    from langchain_rag import LangChainRAGSystem, create_enhanced_rag_system
-    LANGCHAIN_AVAILABLE = True
+    from langchain_rag import SimplifiedRAGSystem, create_enhanced_rag_system
+    RAG_AVAILABLE = True
 except ImportError:
-    LANGCHAIN_AVAILABLE = False
-    print("Error: LangChain not available. Please install: pip install langchain-openai langchain-pinecone")
+    RAG_AVAILABLE = False
+    print("Error: RAG system not available. Please install: pip install langchain-openai langchain-chroma chromadb")
 
 # Import our scraping clients
 try:
@@ -53,21 +53,13 @@ try:
     EXA_AVAILABLE = True
 except ImportError:
     EXA_AVAILABLE = False
-    try:
-        from exa import ExaClient, ExaSearchResult
-        EXA_AVAILABLE = True
-        print("Using custom Exa client (fallback)")
-    except ImportError:
-        print("Warning: Exa clients not available")
+    print("Warning: Exa SDK not available")
 
 # Configuration
 class Settings(BaseSettings):
     openai_api_key: str = ""
-    anthropic_api_key: str = ""
-    firecrawl_api_key: str = ""
     exa_api_key: str = ""
     perplexity_api_key: str = ""
-    pinecone_api_key: str = ""
     rag_topk: int = 6
     policy_version: str = "v0.1.0"
     use_rules_engine: bool = False  # Toggle: True = rules engine decides, False = LLM decides (default)
@@ -75,6 +67,8 @@ class Settings(BaseSettings):
     skip_scraping: bool = False  # Toggle: True = skip scraping documents, False = scrape documents (default)
     use_rag: bool = True  # Toggle: True = use RAG for analysis (slower), False = direct LLM calls (faster)
     llm_timeout: int = 10  # Timeout for LLM API calls in seconds
+    chroma_persist_directory: str = "data/chroma_db"
+    database_path: str = "data/analysis.db"
     
     model_config = {"env_file": ".env", "extra": "ignore"}
 
@@ -465,14 +459,14 @@ class LLMClient:
         """Find compliance signals and regulations"""
         
         if settings.use_rag:
-            # Use LangChain RAG for comprehensive analysis
+            # Use simplified RAG for comprehensive analysis
             rag = get_rag_system()
-            result = rag.langchain_rag.compliance_finder(
+            result = rag.simplified_rag.compliance_finder(
                 artifact.title, artifact.description, artifact.docs,
                 artifact.code_hints, artifact.tags
             )
             
-            # Convert LangChain RAG result to FinderOut format
+            # Convert RAG result to FinderOut format
             return FinderOut(
                 signals=result.get("signals", []),
                 claims=result.get("claims", []),
@@ -504,14 +498,14 @@ Does this feature need geographical compliance? List:
         """Find counter-arguments and missing signals"""
         
         if settings.use_rag:
-            # Use LangChain RAG for comprehensive counter-analysis
+            # Use simplified RAG for comprehensive counter-analysis
             rag = get_rag_system()
-            result = rag.langchain_rag.compliance_counter(
+            result = rag.simplified_rag.compliance_counter(
                 artifact.title, artifact.description, artifact.docs,
                 artifact.code_hints, artifact.tags
             )
             
-            # Convert LangChain RAG result to CounterOut format
+            # Convert RAG result to CounterOut format
             return CounterOut(
                 counter_points=result.get("counter_points", []),
                 missing_signals=result.get("missing_signals", []),
@@ -542,9 +536,9 @@ Why might this NOT need compliance? List:
         """Make final compliance decision"""
         
         if settings.use_rag:
-            # Use LangChain RAG for comprehensive judge analysis
+            # Use simplified RAG for comprehensive judge analysis
             rag = get_rag_system()
-            result = rag.langchain_rag.compliance_judge(
+            result = rag.simplified_rag.compliance_judge(
                 artifact.title, artifact.description,
                 finder_out.signals, finder_out.claims,
                 counter_out.counter_points, counter_out.missing_signals,
@@ -557,7 +551,7 @@ Why might this NOT need compliance? List:
             # Create JudgeOut object
             judge_out = JudgeOut(
                 signals=result.get("signals", all_signals),
-                notes=result.get("notes", "LangChain RAG analysis completed"),
+                notes=result.get("notes", "RAG analysis completed"),
                 confidence=result.get("confidence", 0.5)
             )
             
@@ -615,29 +609,27 @@ def get_llm_client():
         _llm_client = LLMClient()
     return _llm_client
 
-# LangChain RAG System Only
+# Simplified RAG System
 class RAGSystem:
     def __init__(self):
-        if not LANGCHAIN_AVAILABLE:
-            raise ImportError("LangChain is required. Please install: pip install langchain-openai langchain-pinecone")
+        if not RAG_AVAILABLE:
+            raise ImportError("RAG system is required. Please install: pip install langchain-openai langchain-chroma chromadb")
         
         if not settings.openai_api_key:
-            raise ValueError("OPENAI_API_KEY is required for LangChain RAG")
+            raise ValueError("OPENAI_API_KEY is required for RAG")
         
-        if not settings.pinecone_api_key:
-            raise ValueError("PINECONE_API_KEY is required for Pinecone vector store")
-        
-        # Initialize LangChain RAG with Pinecone
+        # Initialize Simplified RAG with Chroma
         try:
-            from langchain_rag import LangChainRAGSystem, LangChainRAGSettings
-            rag_settings = LangChainRAGSettings(
+            from langchain_rag import SimplifiedRAGSystem, SimplifiedRAGSettings
+            rag_settings = SimplifiedRAGSettings(
                 openai_api_key=settings.openai_api_key,
-                pinecone_api_key=settings.pinecone_api_key
+                chroma_persist_directory=settings.chroma_persist_directory,
+                database_path=settings.database_path
             )
-            self.langchain_rag = LangChainRAGSystem(settings=rag_settings)
-            print("✅ LangChain RAG initialized successfully - will use Pinecone vector search")
+            self.simplified_rag = SimplifiedRAGSystem(settings=rag_settings)
+            print("✅ Simplified RAG initialized successfully - using Chroma vector search")
         except Exception as e:
-            print(f"❌ LangChain RAG initialization failed: {e}")
+            print(f"❌ RAG initialization failed: {e}")
             raise
         
         self.chunks = []
@@ -655,7 +647,7 @@ class RAGSystem:
             )
             self.chunks.append(chunk)
         
-        # Convert to ScrapedDocument format for LangChain
+        # Convert to ScrapedDocument format for simplified RAG
         try:
             from langchain_rag import ScrapedDocument
             from datetime import datetime
@@ -674,37 +666,37 @@ class RAGSystem:
                 )
                 scraped_docs.append(scraped_doc)
             
-            # Index into LangChain RAG
+            # Index into simplified RAG
             import asyncio
-            indexed_count = asyncio.run(self.langchain_rag.index_scraped_documents(scraped_docs))
-            print(f"📚 Indexed {indexed_count} chunks into LangChain RAG system")
+            indexed_count = asyncio.run(self.simplified_rag.index_scraped_documents(scraped_docs))
+            print(f"📚 Indexed {indexed_count} chunks into simplified RAG system")
             return indexed_count
             
         except Exception as e:
-            print(f"❌ Could not index documents into LangChain RAG: {e}")
+            print(f"❌ Could not index documents into RAG: {e}")
             raise
     
     def retrieve(self, query: str, k: int = 6) -> List[Chunk]:
         try:
-            # Use LangChain's vector retrieval
-            docs = self.langchain_rag.retrieve(query, k)
+            # Use simplified RAG's vector retrieval
+            docs = self.simplified_rag.retrieve(query, k)
             
             # Convert back to Chunk format for compatibility
             relevant_chunks = []
             for doc in docs:
                 chunk = Chunk(
-                    id=f"langchain_{len(relevant_chunks)}",
+                    id=f"rag_{len(relevant_chunks)}",
                     content=doc.page_content,
                     source=doc.metadata.get('url', 'unknown'),
                     metadata=doc.metadata
                 )
                 relevant_chunks.append(chunk)
             
-            print(f"🔍 LangChain RAG found {len(relevant_chunks)} relevant legal documents")
+            print(f"🔍 Simplified RAG found {len(relevant_chunks)} relevant legal documents")
             return relevant_chunks
             
         except Exception as e:
-            print(f"❌ LangChain retrieval failed: {e}")
+            print(f"❌ RAG retrieval failed: {e}")
             return []
     
     
@@ -746,11 +738,8 @@ class ScrapingAggregator:
         # Initialize Exa client if available
         if EXA_AVAILABLE and settings.exa_api_key:
             try:
-                if 'ExaSDKClient' in globals():
-                    self.exa_client = ExaSDKClient()
-                else:
-                    self.exa_client = ExaClient()
-                print("✅ Exa client initialized")
+                self.exa_client = ExaSDKClient()
+                print("✅ Exa SDK client initialized")
             except Exception as e:
                 print(f"⚠️  Failed to initialize Exa client: {e}")
     
@@ -876,23 +865,31 @@ class ScrapingAggregator:
             print(f"\n📋 Processing with LangChain RAG ({refresh_mode}): {name} ({jurisdiction})")
             
             try:
-                # Use LangChain RAG to find URLs, scrape, and index documents
+                # Use simplified RAG to find URLs, scrape, and index documents
                 rag = get_rag_system()
-                indexed_count = await rag.langchain_rag.index_regulation_from_search_apis(
-                    name, jurisdiction, self.perplexity_client, self.exa_client, force_refresh=force_refresh, skip_indexing=settings.skip_indexing
+                
+                # Prepare search clients list
+                search_clients = []
+                if self.perplexity_client:
+                    search_clients.append(self.perplexity_client)
+                if self.exa_client:
+                    search_clients.append(self.exa_client)
+                
+                indexed_count = await rag.simplified_rag.index_regulation_from_search_apis(
+                    name, jurisdiction, search_clients, force_refresh=force_refresh, skip_indexing=settings.skip_indexing
                 )
                 sources_count[f"{name}_{jurisdiction}"] = indexed_count
                 total_indexed += indexed_count
                 
             except Exception as e:
-                print(f"⚠️  LangChain RAG processing failed for {name}: {e}")
+                print(f"⚠️  RAG processing failed for {name}: {e}")
                 sources_count[f"{name}_{jurisdiction}"] = 0
         
         return {
             "ingested": total_indexed,
             "regulations_processed": len(regulations),
             "sources": sources_count,
-            "system": "langchain_rag",
+            "system": "simplified_rag",
             "force_refresh": force_refresh
         }
     
@@ -923,7 +920,7 @@ class ScrapingAggregator:
             "ingested": len(all_docs),
             "regulations_processed": len(sources_count),
             "sources": sources_count,
-            "system": "langchain_rag"
+            "system": "simplified_rag"
         }
     
     async def close(self):
@@ -1067,7 +1064,7 @@ async def analyze(artifact: FeatureArtifact) -> Decision:
         # LLM makes the final decision
         needs_compliance = judge_out.llm_decision if judge_out.llm_decision is not None else False
         reasoning = judge_out.notes
-        matched_rules = ["LANGCHAIN_RAG_DECISION"]
+        matched_rules = ["SIMPLIFIED_RAG_DECISION"]
         
         # Extract regulations from finder claims
         regulations = []
@@ -1092,7 +1089,7 @@ async def analyze(artifact: FeatureArtifact) -> Decision:
     for citation_ref in finder_out.citations[:3]:
         citations.append(Citation(
             source=citation_ref,
-            snippet="LangChain RAG retrieved document"
+            snippet="RAG retrieved document"
         ))
     
     # Create decision
@@ -1111,6 +1108,18 @@ async def analyze(artifact: FeatureArtifact) -> Decision:
     
     # Write receipt and set hash
     decision.hash = get_evidence_system().write_receipt(decision)
+    
+    # Store in database if using RAG
+    if settings.use_rag:
+        try:
+            rag = get_rag_system()
+            rag.simplified_rag.store_analysis(
+                decision.feature_id, decision.needs_geo_compliance, decision.confidence,
+                decision.reasoning, decision.regulations, decision.signals,
+                [c.source for c in decision.citations], session_id="main_analysis"
+            )
+        except Exception as e:
+            print(f"⚠️  Failed to store analysis in database: {e}")
     
     return decision
 
@@ -1250,8 +1259,7 @@ async def refresh_corpus():
         
         regulations = inputs_config.get('regulations', [])
         if not regulations:
-            # Fallback to mock data if no configuration
-            return await refresh_corpus_fallback()
+            return {"error": "No regulations configured in inputs.yaml", "ingested": 0}
         
         # Use the scraping aggregator to research all regulations
         scraping = get_scraping_aggregator()
@@ -1261,86 +1269,27 @@ async def refresh_corpus():
         
     except Exception as e:
         print(f"⚠️  Failed to refresh corpus from inputs.yaml: {e}")
-        # Fallback to mock data
-        return await refresh_corpus_fallback()
+        return {"error": str(e), "ingested": 0}
 
-async def refresh_corpus_fallback():
-    """Fallback corpus refresh with mock data"""
-    mock_docs = [
-        RawDoc(
-            url="https://eur-lex.europa.eu/legal-content/EN/TXT/?uri=CELEX%3A32022R2065",
-            content="""EU Digital Services Act (DSA) Article 38 - Recommender Systems Transparency:
-
-            1. Recipients of the service shall be able to easily understand when information is being prioritised based on profiling as defined in Article 4(4) of Regulation (EU) 2016/679.
-
-            2. For each of their recommender systems, providers of online platforms shall set out in their terms and conditions, in plain and intelligible language:
-            (a) the main parameters used in their recommender systems, as well as any options for the recipients of the service to modify or influence those main parameters, including at least one option which is not based on profiling;
-            (b) how to access and use the options referred to in point (a).
-
-            3. Providers of online platforms shall provide recipients of their service with at least one option for each of their recommender systems that is not based on profiling. That option shall be prominently displayed and easily accessible.
-
-            4. Very large online platforms shall provide recipients with easily accessible functionality that allows them to view content that is not recommended on the basis of profiling or categorisation of the recipient.
-
-            Article 39 - Risk Assessment:
-            Very large online platforms shall diligently identify, analyse and assess any systemic risks in the Union stemming from the design or functioning of their service and its related systems, including algorithmic systems, or from the use made of their service. Those assessments shall include the following systemic risks:
-            (a) the dissemination of illegal content;
-            (b) any actual or foreseeable negative effects for the exercise of fundamental rights;
-            (c) intentional manipulation of their service, including by means of inauthentic use or automated exploitation of the service.""",
-            title="EU Digital Services Act - Recommender Systems & Risk Assessment",
-            metadata={"jurisdiction": "EU", "topic": "recommender_systems", "compliance_areas": "profiling,transparency,risk_assessment"}
-        ),
-        RawDoc(
-            url="https://leginfo.legislature.ca.gov/faces/billTextClient.xhtml?bill_id=202320240SB976",
-            content="""California SB976 - Social Media Platforms: Children
-            SEC. 2. Chapter 22.1 (commencing with Section 22675) is added to Division 8 of the Business and Professions Code, to read:
-
-            22675. For purposes of this chapter:
-            (a) "Child" means a natural person under 18 years of age.
-            (b) "Social media platform" means an internet website or application that is primarily used for social networking and allows users to view and post content, communicate with other users, and join communities.
-
-            22676. (a) A social media platform shall not use the personal information of a child to provide advertising that is targeted to that child.
-            (b) A social media platform shall not use any system design feature that the platform knows, or should know, causes or is reasonably likely to cause addiction-like behavior by children on the platform.
-
-            22677. (a) A social media platform shall provide, by default, the highest privacy settings for child users and shall require affirmative consent before reducing those privacy protections.
-            (b) A social media platform shall not send notifications to a child between the hours of 12 a.m. and 6 a.m. or during school hours, unless there is an imminent threat to the child's physical safety.
-
-            22678. Enforcement and Civil Penalties:
-            (a) A violation of this chapter constitutes an unlawful business practice under Section 17200.
-            (b) The Attorney General may seek civil penalties up to $25,000 per affected child for each violation.
-            (c) A child or parent may bring a civil action for violations, seeking actual damages or $1,000, whichever is greater.""",
-            title="California SB976 - Social Media Child Protection",
-            metadata={"jurisdiction": "CA", "topic": "minors_protection", "compliance_areas": "targeted_advertising,privacy,parental_controls,penalties"}
-        )
-    ]
-    
-    indexed_count = get_rag_system().index_documents(mock_docs)
-    
-    return {
-        "ingested": indexed_count,
-        "sources": {
-            "EU-DSA": 1,
-            "CA-SB976": 1
-        }
-    }
 
 @app.get("/api/rag_status")
 async def get_rag_status():
     """Debug endpoint to check RAG system status"""
     try:
-        # Get LangChain RAG status
+        # Get simplified RAG status
         return {
-            "system": "langchain",
-            "langchain_initialized": True,
+            "system": "simplified_rag",
+            "rag_initialized": True,
             "chunks_available": len(get_rag_system().chunks),
-            "vectorstore_available": get_rag_system().langchain_rag.vectorstore is not None,
-            "rag_chain_available": get_rag_system().langchain_rag.rag_chain is not None
+            "vectorstore_available": get_rag_system().simplified_rag.vectorstore is not None,
+            "rag_chain_available": get_rag_system().simplified_rag.rag_chain is not None
         }
         
     except Exception as e:
         return {
             "error": str(e),
-            "system": "langchain",
-            "chunks_available": len(rag_system.chunks)
+            "system": "simplified_rag",
+            "chunks_available": 0
         }
 
 # Initialize with some sample data

@@ -1,221 +1,183 @@
-# GeoGov Lite - Enhanced Legal Compliance Analysis
+# GeoGov Lite - Compliance Analysis System
 
-A FastAPI-based system for automated geo-regulatory compliance analysis with integrated Perplexity and Exa.ai research capabilities.
+A simplified compliance analysis system using AI-powered document retrieval and analysis to determine if software features require geographical compliance.
 
-## 🚀 New Features
+## 🚀 Quick Start with Docker
 
-- **Integrated Research APIs** - Perplexity and Exa.ai for real-time legal source discovery
-- **Dynamic Input Configuration** - YAML-based regulation and feature definitions
-- **Enhanced Knowledge Base** - Automatic research and indexing of official legal sources
-- **Comprehensive Analysis Pipeline** - End-to-end compliance assessment with validation
-- **Evidence Generation** - Complete audit trails with cryptographic receipts
-- **Batch Processing** - Analyze multiple features with summary reporting
-
-## Quick Start
+### Prerequisites
+- Docker and Docker Compose installed
+- OpenAI API key (required)
+- Exa API key (optional, for enhanced search)
+- Perplexity API key (optional, for enhanced search)
 
 ### 1. Setup Environment
 ```bash
-# Install dependencies
-pip install -r requirements.txt
-
-# Configure API keys in .env
+# Copy environment template
 cp .env.example .env
-# Edit .env with your API keys (see Configuration section below)
+
+# Edit .env and add your API keys
+OPENAI_API_KEY=your_openai_api_key_here
+EXA_API_KEY=your_exa_api_key_here  # optional
+PERPLEXITY_API_KEY=your_perplexity_api_key_here  # optional
 ```
 
-### 2. Run Analysis
+### 2. Run the Application
 ```bash
-# Full analysis with dynamic inputs
-python3 run_analysis.py
+# Start both frontend and backend
+docker-compose up -d
 
-# Single feature analysis
-python3 run_analysis.py --feature F-2381
+# View logs
+docker-compose logs -f
 
-# Integration tests
-python3 test_integration.py
+# Stop the application
+docker-compose down
 ```
 
-### 3. Start API Server
-```bash
-# Start FastAPI server
-uvicorn main:app --reload
+### 3. Access the Application
+- **Frontend**: http://localhost:3000
+- **Backend API**: http://localhost:8000
+- **API Docs**: http://localhost:8000/docs
 
-# Test endpoints
-curl -X POST http://localhost:8000/api/refresh_corpus
-curl -X GET http://localhost:8000/api/health
+## 🏗️ Architecture
+
+### Simplified Stack
+- **Frontend**: React + Vite + Nginx (Port 3000)
+- **Backend**: FastAPI + Python (Port 8000)
+- **Vector Store**: Chroma (local, persistent)
+- **Database**: SQLite (local, persistent)
+- **LLM**: OpenAI GPT-4o-mini
+
+### Data Flow
+```
+Search APIs → Document Scraping → Chroma Vector Store → RAG Analysis → SQLite Storage
 ```
 
-The API will be available at `http://localhost:8000` with interactive docs at `http://localhost:8000/docs`.
+## 📊 Key Features
 
-## 📁 Key Files
+### Compliance Analysis
+- **Three-stage analysis**: Finder → Counter → Judge
+- **RAG-powered**: Retrieves relevant legal documents
+- **Dual decision modes**: LLM-based vs Rules-based
+- **Persistent storage**: SQLite database for analysis history
 
-### Core System
-- **`main.py`** - Enhanced FastAPI application with integrated scraping
-- **`perplexity.py`** - Perplexity API client for legal research
-- **`exa.py`** - Exa.ai API client (HTTP version)
-- **`exa_sdk.py`** - Exa.ai official SDK client (recommended)
-
-### Configuration & Input
-- **`inputs.yaml`** - Dynamic configuration for regulations and test features
-- **`rules.yaml`** - Compliance rules engine configuration
-- **`.env`** - API keys and environment settings
-
-### Analysis & Testing
-- **`run_analysis.py`** - Complete analysis workflow runner
-- **`test_integration.py`** - Integration tests for the enhanced system
+### Document Sources
+- **Perplexity API**: Real-time search of legal documents
+- **Exa API**: AI-powered search for official government sources
+- **Auto-scraping**: Full document content extraction
+- **Official domains**: Focus on .gov, .eu, and legal databases
 
 ## 🔧 Configuration
 
-### API Keys Required
-```env
-# Core APIs
-OPENAI_API_KEY=sk-...           # For LLM operations and Mem0
-ANTHROPIC_API_KEY=sk-ant-...    # Alternative LLM (optional)
+### Environment Variables
+| Variable | Required | Default | Description |
+|----------|----------|---------|-------------|
+| `OPENAI_API_KEY` | ✅ | - | OpenAI API key for LLM analysis |
+| `EXA_API_KEY` | ❌ | - | Exa API key for enhanced search |
+| `PERPLEXITY_API_KEY` | ❌ | - | Perplexity API key for search |
+| `USE_RAG` | ❌ | `true` | Enable RAG analysis |
+| `USE_RULES_ENGINE` | ❌ | `false` | Use rules vs LLM for decisions |
+| `RAG_TOPK` | ❌ | `6` | Number of documents to retrieve |
 
-# Research APIs  
-PERPLEXITY_API_KEY=pplx-...     # Perplexity search
-EXA_API_KEY=...                 # Exa.ai search
+### Configuration Files
+- **`backend/inputs.yaml`**: Define regulations and test features
+- **`backend/rules.yaml`**: Rules engine configuration
 
-# Optional
-FIRECRAWL_API_KEY=fc-...        # Web scraping (future)
-MEM0_KEY=m0-...                 # Mem0 cloud service
+## 📋 API Endpoints
+
+### Core Analysis
+- `POST /api/analyze` - Analyze single feature
+- `POST /api/bulk_analyze` - Analyze multiple features
+- `GET /api/evidence` - Download evidence ZIP
+
+### System Management  
+- `GET /api/health` - System health check
+- `GET /api/rag_status` - RAG system status
+- `POST /api/refresh_corpus` - Update knowledge base
+- `POST /api/toggle_rag` - Enable/disable RAG
+
+## 🗄️ Data Storage
+
+### Vector Store (Chroma)
+- **Location**: `data/chroma_db/`
+- **Purpose**: Legal document embeddings
+- **Persistent**: Yes, mounted in Docker
+
+### Database (SQLite)
+- **Location**: `data/analysis.db`
+- **Tables**: `analyses`, `documents`
+- **Purpose**: Analysis history and metadata
+
+## 🛠️ Development
+
+### Local Development
+```bash
+# Backend only
+cd backend
+pip install -r requirements.txt
+python main.py
+
+# Frontend only  
+cd frontend
+npm install
+npm run dev
 ```
 
-### Input Configuration (`inputs.yaml`)
-
-The system now uses a dynamic YAML configuration file that defines:
-
-#### Regulations to Research
+### Adding Regulations
+Edit `backend/inputs.yaml`:
 ```yaml
 regulations:
-  - name: "EU Digital Services Act"
-    jurisdiction: "EU"
-    topics: ["recommender_systems", "content_moderation"] 
-    priority: "high"
+  - name: "Your Regulation Name"
+    jurisdiction: "Your Jurisdiction"
 ```
 
-#### Test Features
+### Custom Rules
+Edit `backend/rules.yaml`:
 ```yaml
-test_features:
-  - feature_id: "F-2381"
-    title: "Personalized Home Feed v3"
-    description: "Reranks videos using watch history; EU rollout planned."
-    code_hints:
-      - "uses ageGate() for minor detection"
-      - "if region in ['EU','EEA']: apply_dsa_compliance()"
-    tags: ["recommender", "personalization", "geo_eu"]
-    expected_compliance: true
-    expected_regulations: ["EU-DSA"]
+rules:
+  - id: "your_rule"
+    verdict: true
+    reason: "Your reason"
+    regulations: ["Regulation Name"]
+    when_any_text: ["keyword1", "keyword2"]
 ```
 
-## API Endpoints
+## 🔍 Sample Analysis
 
-### Health Check
+The system includes sample test features:
+1. **Personalized Content Feed** - Expected: Compliance Required (EU DSA)
+2. **Basic Chat Messaging** - Expected: No Compliance Needed
+3. **Youth-Targeted Ads** - Expected: Compliance Required (COPPA, SB976)
+
+## 🚨 Troubleshooting
+
+### Common Issues
+1. **"No search clients available"** - Add API keys to `.env`
+2. **"RAG initialization failed"** - Check OpenAI API key
+3. **"No regulations configured"** - Ensure `inputs.yaml` exists
+4. **Frontend can't reach API** - Check Docker networking
+
+### Health Checks
 ```bash
+# Check backend health
 curl http://localhost:8000/api/health
+
+# Check RAG status
+curl http://localhost:8000/api/rag_status
+
+# Check frontend
+curl http://localhost:3000
 ```
 
-### Analyze Single Feature
+### Logs
 ```bash
-curl -X POST http://localhost:8000/api/analyze \
-  -H "Content-Type: application/json" \
-  -d @sample_artifact.json
+# All services
+docker-compose logs
+
+# Specific service
+docker-compose logs backend
+docker-compose logs frontend
 ```
 
-### Bulk Analysis
-```bash
-curl -X POST http://localhost:8000/api/bulk_analyze \
-  -H "Content-Type: application/json" \
-  -d '{"items": [<array_of_feature_artifacts>]}'
-```
+## 📝 License
 
-### Get Evidence ZIP
-```bash
-curl http://localhost:8000/api/evidence -o evidence.zip
-```
-
-### Refresh Corpus (Admin)
-```bash
-curl -X POST http://localhost:8000/api/refresh_corpus
-```
-
-## Sample Request
-
-The `sample_artifact.json` file contains an example feature artifact:
-
-```json
-{
-  "feature_id": "F-2381",
-  "title": "Personalized Home Feed v3",
-  "description": "Reranks videos using watch history; EU rollout planned.",
-  "docs": ["https://internal/prd", "https://internal/trd"],
-  "code_hints": ["uses ageGate()", "if region in ['EU','EEA']:"],
-  "tags": ["recommender", "personalization", "minors_possible"]
-}
-```
-
-## Configuration
-
-The rules engine uses `rules.yaml` to define compliance requirements. The file includes starter rules for:
-
-- EU DSA recommender systems
-- EU DSA moderation appeals
-- US state minor protection laws
-- NCMEC reporting requirements
-- Business geofencing detection
-
-## Architecture
-
-The application is structured as a single Python file (`main.py`) containing:
-
-- **FastAPI endpoints** for all API routes
-- **Pydantic models** for request/response validation
-- **Rules engine** with YAML-based policy configuration
-- **Signal extraction** using regex patterns and NER
-- **Mock LLM integration** (replaceable with actual OpenAI/Anthropic calls)
-- **RAG system** using BM25 and vector search
-- **Evidence system** for audit trails and compliance reporting
-
-## Simple, Effective RAG System
-
-The application uses a **self-contained RAG implementation** that requires no external services or API keys:
-
-### Why This Approach?
-
-- ✅ **Zero dependencies** on external vector databases or embedding APIs
-- ✅ **Fast startup** - no model downloads or API connections needed
-- ✅ **Reliable operation** - works consistently across all environments
-- ✅ **TF-IDF + Cosine Similarity** - proven, effective for document retrieval
-- ✅ **No API keys required** - completely self-contained
-
-### How It Works
-
-1. **TF-IDF Vectorization**: Documents are converted to vectors using term frequency-inverse document frequency
-2. **Cosine Similarity**: Query vectors are matched against document vectors
-3. **Relevance Ranking**: Returns the most similar documents above a threshold
-4. **Citation Generation**: Provides source attribution for retrieved content
-
-### Extending to Mem0 (Optional)
-
-If you prefer Mem0's advanced features, you can:
-1. Install additional dependencies: `pip install mem0ai chromadb`
-2. Replace the `RAGSystem` class with the Mem0 implementation
-3. Configure your preferred vector store and embedding provider
-
-## Production Considerations
-
-This is a hackathon/demo implementation with simplified components:
-
-- LLM calls are mocked (replace with actual API calls)
-- Mem0 RAG system implemented but may need environment-specific tuning
-- SQLite storage (upgrade to PostgreSQL for production)
-- No authentication or RBAC
-- Basic error handling
-
-For production deployment, implement proper:
-- LLM API integration with retry logic
-- Vector database optimization (Pinecone, Weaviate, or properly configured Mem0)
-- Authentication and authorization
-- Rate limiting and monitoring
-- Comprehensive error handling
-- Horizontal scaling capabilities
+This project is for compliance analysis and research purposes.
