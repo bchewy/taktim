@@ -4,12 +4,12 @@ const BulkAnalysis = () => {
   const [features, setFeatures] = useState([
     {
       id: 1,
-      feature_name: '',
-      description: '',
-      target_markets: ['US'],
-      data_collected: [],
-      user_demographics: ['general_audience'],
-      ai_components: []
+      summary: '',
+      project_name: '',
+      project_description: '',
+      project_type: '',
+      priority: '',
+      due_date: ''
     }
   ]);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
@@ -18,12 +18,12 @@ const BulkAnalysis = () => {
   const addFeature = () => {
     setFeatures(prev => [...prev, {
       id: prev.length + 1,
-      feature_name: '',
-      description: '',
-      target_markets: ['US'],
-      data_collected: [],
-      user_demographics: ['general_audience'],
-      ai_components: []
+      summary: '',
+      project_name: '',
+      project_description: '',
+      project_type: '',
+      priority: '',
+      due_date: ''
     }]);
   };
 
@@ -37,18 +37,13 @@ const BulkAnalysis = () => {
     ));
   };
 
-  const handleArrayChange = (id, field, value) => {
-    const arrayValue = value.split(',').map(item => item.trim()).filter(item => item);
-    updateFeature(id, field, arrayValue);
-  };
-
   const handleBulkAnalysis = async () => {
     setIsAnalyzing(true);
     setResults([]);
     
     try {
       const promises = features.map(async (feature) => {
-        if (!feature.feature_name || !feature.description) return null;
+        if (!feature.summary || !feature.project_name || !feature.project_description) return null;
         
         const response = await fetch('http://localhost:8001/api/comprehensive-compliance-analysis', {
           method: 'POST',
@@ -76,7 +71,7 @@ const BulkAnalysis = () => {
     <div>
       <div className="mb-8">
         <h1 className="text-3xl font-bold text-gray-900 mb-2">Bulk Feature Analysis</h1>
-        <p className="text-gray-600">Analyze multiple TikTok features for compliance simultaneously</p>
+        <p className="text-gray-600">Analyze multiple features for compliance simultaneously</p>
       </div>
 
       <div className="space-y-8">
@@ -114,62 +109,85 @@ const BulkAnalysis = () => {
                     </label>
                     <input
                       type="text"
-                      value={feature.feature_name}
-                      onChange={(e) => updateFeature(feature.id, 'feature_name', e.target.value)}
+                      value={feature.project_name}
+                      onChange={(e) => updateFeature(feature.id, 'project_name', e.target.value)}
                       className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
-                      placeholder="e.g., AI Teen Discovery Feed"
+                      placeholder="e.g., Video Upload Feature"
                     />
                   </div>
 
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-1">
-                      Target Markets
+                      Feature Type
                     </label>
-                    <input
-                      type="text"
-                      value={feature.target_markets.join(', ')}
-                      onChange={(e) => handleArrayChange(feature.id, 'target_markets', e.target.value)}
+                    <select
+                      value={feature.project_type}
+                      onChange={(e) => updateFeature(feature.id, 'project_type', e.target.value)}
                       className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
-                      placeholder="US, EU, Canada"
+                    >
+                      <option value="">Select feature type</option>
+                      <option value="Web Application">Web Application</option>
+                      <option value="Mobile Application">Mobile Application</option>
+                      <option value="API Development">API Development</option>
+                      <option value="Data Processing">Data Processing</option>
+                      <option value="AI/ML Solution">AI/ML Solution</option>
+                      <option value="Infrastructure">Infrastructure</option>
+                      <option value="Other">Other</option>
+                    </select>
+                  </div>
+
+                  <div className="md:col-span-2">
+                    <label className="block text-sm font-medium text-gray-700 mb-1">
+                      Summary *
+                    </label>
+                    <textarea
+                      value={feature.summary}
+                      onChange={(e) => updateFeature(feature.id, 'summary', e.target.value)}
+                      rows={2}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      placeholder="Brief summary of the feature"
                     />
                   </div>
 
                   <div className="md:col-span-2">
                     <label className="block text-sm font-medium text-gray-700 mb-1">
-                      Description *
+                      Feature Description *
                     </label>
                     <textarea
-                      value={feature.description}
-                      onChange={(e) => updateFeature(feature.id, 'description', e.target.value)}
-                      rows={2}
+                      value={feature.project_description}
+                      onChange={(e) => updateFeature(feature.id, 'project_description', e.target.value)}
+                      rows={3}
                       className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
-                      placeholder="Brief description of functionality"
+                      placeholder="Detailed description of feature functionality"
                     />
                   </div>
 
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-1">
-                      Data Collected
+                      Priority
                     </label>
-                    <input
-                      type="text"
-                      value={feature.data_collected.join(', ')}
-                      onChange={(e) => handleArrayChange(feature.id, 'data_collected', e.target.value)}
+                    <select
+                      value={feature.priority}
+                      onChange={(e) => updateFeature(feature.id, 'priority', e.target.value)}
                       className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
-                      placeholder="location_data, viewing_history"
-                    />
+                    >
+                      <option value="">Select priority</option>
+                      <option value="Low">Low</option>
+                      <option value="Medium">Medium</option>
+                      <option value="High">High</option>
+                      <option value="Critical">Critical</option>
+                    </select>
                   </div>
 
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-1">
-                      User Demographics
+                      Due Date
                     </label>
                     <input
-                      type="text"
-                      value={feature.user_demographics.join(', ')}
-                      onChange={(e) => handleArrayChange(feature.id, 'user_demographics', e.target.value)}
+                      type="date"
+                      value={feature.due_date}
+                      onChange={(e) => updateFeature(feature.id, 'due_date', e.target.value)}
                       className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
-                      placeholder="13-17, adult_users"
                     />
                   </div>
                 </div>
@@ -180,9 +198,9 @@ const BulkAnalysis = () => {
           <div className="mt-6">
             <button
               onClick={handleBulkAnalysis}
-              disabled={isAnalyzing || features.some(f => !f.feature_name || !f.description)}
+              disabled={isAnalyzing || features.some(f => !f.summary || !f.project_name || !f.project_description)}
               className={`w-full py-3 px-4 rounded-md font-medium ${
-                isAnalyzing || features.some(f => !f.feature_name || !f.description)
+                isAnalyzing || features.some(f => !f.summary || !f.project_name || !f.project_description)
                   ? 'bg-gray-400 cursor-not-allowed'
                   : 'bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500'
               } text-white transition-colors`}

@@ -24,7 +24,7 @@ sys.path.append(str(Path(__file__).parent.parent))
 from utils.geo_regulatory_database import GeoRegulatoryDatabase, RiskLevel, ComplianceStatus, GeographicCompliance
 
 @tool("geo_compliance_mapping")
-def geo_compliance_mapping_tool(target_markets: str, feature_characteristics: str, feature_name: str = "Unknown Feature") -> str:
+def geo_compliance_mapping_tool(target_markets: str, feature_characteristics: str, project_name: str = "Unknown Project") -> str:
     """Map TikTok features to jurisdiction-specific regulatory requirements.
     Analyzes target markets and feature characteristics to identify applicable regulations
     in each geographic region. Provides detailed compliance requirements and risk assessment."""
@@ -49,7 +49,7 @@ def geo_compliance_mapping_tool(target_markets: str, feature_characteristics: st
     
     # Format output for agent
     output = []
-    output.append(f"# Geo-Regulatory Compliance Mapping for: {feature_name}")
+    output.append(f"# Geo-Regulatory Compliance Mapping for: {project_name}")
     output.append(f"Target Markets: {', '.join(markets)}")
     output.append(f"Feature Characteristics: {', '.join(characteristics)}")
     output.append(f"Analysis Timestamp: {datetime.utcnow().isoformat()}")
@@ -201,18 +201,21 @@ class GeoRegulatoryAgent:
         
         task = Task(
             description=f"""
-            Conduct comprehensive geo-regulatory compliance analysis for this TikTok feature.
+            Conduct comprehensive geo-regulatory compliance analysis for this project.
             
-            **Feature Details:**
-            - Name: {feature_data.get('feature_name', 'Unknown Feature')}
-            - Description: {feature_data.get('description', 'No description provided')}
-            - Target Markets: {', '.join(feature_data.get('target_markets', []))}
+            **Project Details:**
+            - Name: {feature_data.get('project_name', 'Unknown Project')}
+            - Summary: {feature_data.get('summary', 'No summary provided')}
+            - Description: {feature_data.get('project_description', 'No description provided')}
+            - Type: {feature_data.get('project_type', 'Not specified')}
+            - Priority: {feature_data.get('priority', 'Not specified')}
+            - Due Date: {feature_data.get('due_date', 'Not specified')}
             
             **MANDATORY ANALYSIS STEPS:**
             
             1. **Geo-Compliance Mapping** (REQUIRED):
-               - Use geo_compliance_mapping tool with target_markets: "{', '.join(feature_data.get('target_markets', []))}"
-               - Feature characteristics: Extract relevant characteristics from the feature data
+               - Use geo_compliance_mapping tool with target_markets: "global"
+               - Feature characteristics: Extract relevant characteristics from the project data
                - Include: {self._extract_feature_characteristics(feature_data)}
             
             2. **Audit Trail Generation** (REQUIRED):
@@ -248,14 +251,16 @@ class GeoRegulatoryAgent:
         return {"geo_compliance_analysis": result.raw}
     
     def _extract_feature_characteristics(self, feature_data: Dict[str, Any]) -> str:
-        """Extract feature characteristics for regulatory mapping from description and feature name"""
+        """Extract project characteristics for regulatory mapping from project details"""
         
         characteristics = []
         
-        # Extract from feature name and description
-        feature_name = feature_data.get('feature_name', '').lower()
-        description = feature_data.get('description', '').lower()
-        combined_text = f"{feature_name} {description}"
+        # Extract from project details
+        project_name = feature_data.get('project_name', '').lower()
+        summary = feature_data.get('summary', '').lower()
+        description = feature_data.get('project_description', '').lower()
+        project_type = feature_data.get('project_type', '').lower()
+        combined_text = f"{project_name} {summary} {description} {project_type}"
         
         # AI/ML detection
         if any(term in combined_text for term in ['ai', 'ml', 'algorithm', 'machine learning', 'artificial intelligence', 'recommend', 'personalization', 'intelligence']):
