@@ -4,3 +4,5 @@ data
 .DS_Store
 *.zip
 .venv
+frontend/node_modules/*
+node_modules/

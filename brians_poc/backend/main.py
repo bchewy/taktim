@@ -32,13 +32,13 @@ from tenacity import retry, stop_after_attempt, wait_exponential
 # OpenAI API for LLM integration
 from openai import AsyncOpenAI
 
-# LangChain RAG system
+# Simplified RAG system
 try:
-    from langchain_rag import LangChainRAGSystem, create_enhanced_rag_system
-    LANGCHAIN_AVAILABLE = True
+    from langchain_rag import SimplifiedRAGSystem, create_enhanced_rag_system
+    RAG_AVAILABLE = True
 except ImportError:
-    LANGCHAIN_AVAILABLE = False
-    print("Error: LangChain not available. Please install: pip install langchain-openai langchain-pinecone")
+    RAG_AVAILABLE = False
+    print("Error: RAG system not available. Please install: pip install langchain-openai langchain-chroma chromadb")
 
 # Import our scraping clients
 try:
@@ -53,26 +53,22 @@ try:
     EXA_AVAILABLE = True
 except ImportError:
     EXA_AVAILABLE = False
-    try:
-        from exa import ExaClient, ExaSearchResult
-        EXA_AVAILABLE = True
-        print("Using custom Exa client (fallback)")
-    except ImportError:
-        print("Warning: Exa clients not available")
+    print("Warning: Exa SDK not available")
 
 # Configuration
 class Settings(BaseSettings):
     openai_api_key: str = ""
-    anthropic_api_key: str = ""
-    firecrawl_api_key: str = ""
     exa_api_key: str = ""
     perplexity_api_key: str = ""
-    pinecone_api_key: str = ""
     rag_topk: int = 6
     policy_version: str = "v0.1.0"
     use_rules_engine: bool = False  # Toggle: True = rules engine decides, False = LLM decides (default)
     skip_indexing: bool = False  # Toggle: True = skip vector store indexing, False = index documents (default)
     skip_scraping: bool = False  # Toggle: True = skip scraping documents, False = scrape documents (default)
+    use_rag: bool = True  # Toggle: True = use RAG for analysis (slower), False = direct LLM calls (faster)
+    llm_timeout: int = 10  # Timeout for LLM API calls in seconds
+    chroma_persist_directory: str = "data/chroma_db"
+    database_path: str = "data/analysis.db"
     
     model_config = {"env_file": ".env", "extra": "ignore"}
 
@@ -213,7 +209,14 @@ class SignalExtractor:
         
         return signals
 
-signal_extractor = SignalExtractor()
+# Lazy initialization for signal extractor  
+_signal_extractor = None
+
+def get_signal_extractor():
+    global _signal_extractor
+    if _signal_extractor is None:
+        _signal_extractor = SignalExtractor()
+    return _signal_extractor
 
 # Rules Engine
 class RulesEngine:
@@ -290,7 +293,14 @@ class RulesEngine:
             reason="No compliance requirements detected"
         )
 
-rules_engine = RulesEngine()
+# Lazy initialization for rules engine
+_rules_engine = None
+
+def get_rules_engine():
+    global _rules_engine
+    if _rules_engine is None:
+        _rules_engine = RulesEngine()
+    return _rules_engine
 
 # Real OpenAI LLM Integration
 class LLMClient:
@@ -299,11 +309,14 @@ class LLMClient:
             raise ValueError("OPENAI_API_KEY is required for LLM integration")
         
         self.client = AsyncOpenAI(api_key=settings.openai_api_key)
-        self.model = "gpt-5-2025-08-07"  # Using GPT-5 for best compliance reasoning
+        self.model = "gpt-5-2025-08-07"  # Default model for RAG mode
+        self.direct_model = "gpt-4o-mini"  # Faster model for Direct mode
     
     @retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=4, max=10))
     async def call_openai(self, messages: List[Dict], model: str = None) -> Dict:
         """Call OpenAI API with retry logic"""
+        import asyncio
+        
         try:
             total_prompt_length = sum(len(str(msg)) for msg in messages)
             print(f"🤖 Calling OpenAI API with model: {model or self.model}")
@@ -314,12 +327,15 @@ class LLMClient:
             if total_prompt_length > 20000:  # ~5k tokens
                 print(f"⚠️  Large prompt detected! May hit token limits.")
             
-            response = await self.client.chat.completions.create(
-                model=model or self.model,
-                messages=messages,
-                # temperature=1.0,  # GPT-5 only supports default temperature (1.0)
-                max_completion_tokens=8000,  # Further increased token limit for GPT-5
-                response_format={"type": "json_object"}  # Required for structured output
+            response = await asyncio.wait_for(
+                self.client.chat.completions.create(
+                    model=model or self.model,
+                    messages=messages,
+                    # temperature=1.0,  # GPT-5 only supports default temperature (1.0)
+                    max_completion_tokens=8000  # Further increased token limit for GPT-5
+                    # Removed response_format as it causes GPT-5 to hang
+                ),
+                timeout=settings.llm_timeout
             )
             
             print(f"✅ OpenAI API response received")
@@ -336,293 +352,284 @@ class LLMClient:
                     }
                 }]
             }
+        except asyncio.TimeoutError:
+            print(f"⏱️ OpenAI API timeout after {settings.llm_timeout}s")
+            return {
+                "choices": [{
+                    "message": {
+                        "content": "TIMEOUT: Analysis timed out"
+                    }
+                }]
+            }
         except Exception as e:
-            print(f"OpenAI API error: {e}")
+            print(f"❌ OpenAI API error: {e}")
+            print(f"   Error type: {type(e).__name__}")
             raise
     
+    def _parse_finder_response(self, response: str) -> FinderOut:
+        """Parse natural language finder response"""
+        signals = []
+        claims = []
+        citations = []
+        
+        lines = response.split('\n')
+        current_section = None
+        
+        for line in lines:
+            line = line.strip()
+            if 'SIGNAL' in line.upper():
+                current_section = 'signals'
+            elif 'CLAIM' in line.upper():
+                current_section = 'claims'
+            elif 'CITATION' in line.upper():
+                current_section = 'citations'
+            elif line.startswith('-') or line.startswith('•'):
+                content = line.lstrip('-•').strip()
+                if content and current_section == 'signals':
+                    signals.append(content)
+                elif content and current_section == 'claims':
+                    claims.append({"claim": content, "regulation": content})
+                elif content and current_section == 'citations':
+                    citations.append(content)
+        
+        return FinderOut(signals=signals, claims=claims, citations=citations)
+    
+    def _parse_counter_response(self, response: str) -> CounterOut:
+        """Parse natural language counter response"""
+        counter_points = []
+        missing_signals = []
+        citations = []
+        
+        lines = response.split('\n')
+        current_section = None
+        
+        for line in lines:
+            line = line.strip()
+            if 'REASON' in line.upper() or 'COUNTER' in line.upper():
+                current_section = 'counter'
+            elif 'MISSING' in line.upper() or 'SIGNAL' in line.upper():
+                current_section = 'missing'
+            elif 'CITATION' in line.upper() or 'SOURCE' in line.upper():
+                current_section = 'citations'
+            elif line.startswith('-') or line.startswith('•'):
+                content = line.lstrip('-•').strip()
+                if content and current_section == 'counter':
+                    counter_points.append(content)
+                elif content and current_section == 'missing':
+                    missing_signals.append(content)
+                elif content and current_section == 'citations':
+                    citations.append(content)
+        
+        return CounterOut(counter_points=counter_points, missing_signals=missing_signals, citations=citations)
+    
+    def _parse_judge_response(self, response: str, make_decision: bool) -> JudgeOut:
+        """Parse natural language judge response"""
+        confidence = 0.5
+        decision = None
+        notes = ""
+        
+        lines = response.split('\n')
+        for line in lines:
+            line = line.strip()
+            if 'CONFIDENCE' in line.upper():
+                if 'HIGH' in line.upper():
+                    confidence = 0.9
+                elif 'MEDIUM' in line.upper():
+                    confidence = 0.6
+                elif 'LOW' in line.upper():
+                    confidence = 0.3
+            elif 'DECISION' in line.upper():
+                if 'YES' in line.upper():
+                    decision = True
+                elif 'NO' in line.upper():
+                    decision = False
+            elif 'REASON' in line.upper():
+                # Get everything after REASON:
+                parts = line.split(':', 1)
+                if len(parts) > 1:
+                    notes = parts[1].strip()
+        
+        return JudgeOut(
+            confidence=confidence,
+            notes=notes or response[:200],
+            llm_decision=decision if make_decision else None
+        )
+    
     async def finder(self, artifact: FeatureArtifact, chunks: List[Chunk]) -> FinderOut:
-        """Find compliance signals and regulations using GPT-4"""
+        """Find compliance signals and regulations"""
         
-        # Prepare context from retrieved chunks (reduced for token limits)
-        context = "\n\n".join([
-            f"Source: {chunk.metadata.get('source', 'unknown')}\n"
-            f"Content: {chunk.content[:500]}...\n"  # Truncate each chunk to 500 chars
-            f"Metadata: {chunk.metadata}"
-            for chunk in chunks[:5]  # Limit to top 5 chunks to stay within token limits
-        ])
-        
-        messages = [
-            {
-                "role": "system",
-                "content": "You are a legal compliance expert analyzing software features for geographical regulatory compliance. Your job is to find compliance signals and identify relevant regulations based on legal documents provided as context."
-            },
-            {
-                "role": "user", 
-                "content": f"""Analyze this software feature for geographical compliance requirements:
-
-**Feature:** {artifact.title}
-**Description:** {artifact.description}
-**Documentation:** {' '.join(artifact.docs)}
-**Code Hints:** {' '.join(artifact.code_hints)}
-**Tags:** {', '.join(artifact.tags)}
-
-**Legal Context:**
-{context}
-
-Based on the legal context provided, identify:
-1. Compliance signals (keywords/concepts that suggest regulatory requirements)
-2. Specific regulations that may apply
-3. Why each regulation applies
-4. Citations to specific chunks that support your analysis
-
-Return your analysis as JSON with this structure:
-{{
-  "signals": ["list of compliance signals found"],
-  "claims": [
-    {{
-      "regulation": "regulation name", 
-      "why": "explanation why this regulation applies",
-      "citations": ["chunk reference"]
-    }}
-  ],
-  "citations": ["list of all chunk references used"]
-}}"""
-            }
-        ]
-        
-        try:
-            response = await self.call_openai(messages)
-            content = response["choices"][0]["message"]["content"]
+        if settings.use_rag:
+            # Use simplified RAG for comprehensive analysis
+            rag = get_rag_system()
+            result = rag.simplified_rag.compliance_finder(
+                artifact.title, artifact.description, artifact.docs,
+                artifact.code_hints, artifact.tags
+            )
             
-            # Debug: print the raw response
-            print(f"🔍 Finder raw response: {content[:200]}...")
-            
-            if not content or content.strip() == "":
-                print("⚠️  Empty response from LLM")
-                return FinderOut(signals=[], claims=[], citations=[])
-            
-            result = json.loads(content)
-            
+            # Convert RAG result to FinderOut format
             return FinderOut(
                 signals=result.get("signals", []),
                 claims=result.get("claims", []),
                 citations=result.get("citations", [])
             )
-        except json.JSONDecodeError as e:
-            print(f"Finder JSON decode error: {e}")
-            print(f"Raw response: {content}")
-            return FinderOut(signals=[], claims=[], citations=[])
-        except Exception as e:
-            print(f"Finder LLM call failed: {e}")
-            return FinderOut(signals=[], claims=[], citations=[])
+        else:
+            # Direct LLM call without RAG (faster but less context-aware)
+            prompt = f"""Feature: {artifact.title}
+Description: {artifact.description}
+Tags: {', '.join(artifact.tags) if artifact.tags else 'none'}
+
+Does this feature need geographical compliance? List:
+- SIGNALS: Compliance indicators found
+- CLAIMS: Relevant regulations
+- CITATIONS: Sources"""
+            
+            messages = [{"role": "user", "content": prompt}]
+            # Use faster model for Direct mode
+            response = await self.call_openai(messages, model=self.direct_model)
+            
+            try:
+                content = response["choices"][0]["message"]["content"]
+                return self._parse_finder_response(content)
+            except (KeyError, Exception) as e:
+                print(f"Error parsing finder response: {e}")
+                return FinderOut(signals=[], claims=[], citations=[])
     
     async def counter(self, artifact: FeatureArtifact, chunks: List[Chunk]) -> CounterOut:
-        """Find counter-arguments and missing signals using GPT-4"""
+        """Find counter-arguments and missing signals"""
         
-        context = "\n\n".join([
-            f"Source: {chunk.metadata.get('source', 'unknown')}\n"
-            f"Content: {chunk.content[:500]}...\n"  # Truncate each chunk to 500 chars
-            f"Metadata: {chunk.metadata}"
-            for chunk in chunks[:5]  # Limit to top 5 chunks to stay within token limits
-        ])
-        
-        messages = [
-            {
-                "role": "system",
-                "content": "You are a legal compliance expert. Your job is to find counter-arguments and identify missing compliance signals that might suggest a feature does NOT require geographical regulatory compliance."
-            },
-            {
-                "role": "user",
-                "content": f"""Analyze this software feature for potential exemptions or counter-arguments to geographical compliance:
-
-**Feature:** {artifact.title}
-**Description:** {artifact.description}
-**Documentation:** {' '.join(artifact.docs)}
-**Code Hints:** {' '.join(artifact.code_hints)}
-**Tags:** {', '.join(artifact.tags)}
-
-**Legal Context:**
-{context}
-
-Find counter-arguments and missing signals that might suggest this feature does NOT require geographical compliance:
-1. Counter-points (arguments against compliance requirements)
-2. Missing signals (compliance indicators that are notably absent)
-3. Citations supporting your counter-analysis
-
-Return as JSON:
-{{
-  "counter_points": ["list of arguments against compliance requirements"],
-  "missing_signals": ["list of compliance signals that are notably missing"],
-  "citations": ["list of chunk references"]
-}}"""
-            }
-        ]
-        
-        try:
-            response = await self.call_openai(messages)
-            content = response["choices"][0]["message"]["content"]
+        if settings.use_rag:
+            # Use simplified RAG for comprehensive counter-analysis
+            rag = get_rag_system()
+            result = rag.simplified_rag.compliance_counter(
+                artifact.title, artifact.description, artifact.docs,
+                artifact.code_hints, artifact.tags
+            )
             
-            # Debug: print the raw response
-            print(f"🔄 Counter raw response: {content[:200]}...")
-            
-            if not content or content.strip() == "":
-                print("⚠️  Empty response from Counter LLM")
-                return CounterOut(counter_points=[], missing_signals=[], citations=[])
-            
-            result = json.loads(content)
-            
+            # Convert RAG result to CounterOut format
             return CounterOut(
                 counter_points=result.get("counter_points", []),
                 missing_signals=result.get("missing_signals", []),
                 citations=result.get("citations", [])
             )
-        except json.JSONDecodeError as e:
-            print(f"Counter JSON decode error: {e}")
-            print(f"Raw response: {content}")
-            return CounterOut(counter_points=[], missing_signals=[], citations=[])
-        except Exception as e:
-            print(f"Counter LLM call failed: {e}")
-            return CounterOut(counter_points=[], missing_signals=[], citations=[])
+        else:
+            # Direct LLM call without RAG
+            prompt = f"""Feature: {artifact.title}
+Description: {artifact.description}
+
+Why might this NOT need compliance? List:
+- COUNTER POINTS: Reasons compliance may not apply
+- MISSING SIGNALS: What indicators are absent
+- CITATIONS: Sources"""
+            
+            messages = [{"role": "user", "content": prompt}]
+            # Use faster model for Direct mode
+            response = await self.call_openai(messages, model=self.direct_model)
+            
+            try:
+                content = response["choices"][0]["message"]["content"]
+                return self._parse_counter_response(content)
+            except (KeyError, Exception) as e:
+                print(f"Error parsing counter response: {e}")
+                return CounterOut(counter_points=[], missing_signals=[], citations=[])
     
     async def judge(self, artifact: FeatureArtifact, finder_out: FinderOut, counter_out: CounterOut, make_decision: bool = False) -> JudgeOut:
-        """Make final compliance decision using GPT-4"""
+        """Make final compliance decision"""
         
-        if make_decision:
-            # LLM makes the final decision
-            system_msg = "You are a senior legal compliance expert making final decisions on whether software features require geographical regulatory compliance. You must weigh evidence for and against compliance requirements."
-            instructions = """**Instructions:**
-1. Synthesize all evidence for and against
-2. Make a final determination on compliance requirements  
-3. Assign a confidence score (0.0-1.0)
-4. Combine all relevant signals found
-5. Provide clear reasoning
-
-Return as JSON:
-{{
-  "signals": ["combined list of all relevant signals"],
-  "notes": "detailed reasoning for your decision", 
-  "confidence": 0.85,
-  "requires_compliance": true
-}}"""
-        else:
-            # LLM only analyzes, doesn't decide (original PRD behavior)
-            system_msg = "You are a legal compliance expert. Merge findings from compliance analysis. Normalize signals and provide confidence, but do NOT make the final YES/NO decision - that will be handled by a separate rules engine."
-            instructions = """**Instructions:**
-1. Synthesize all evidence for and against
-2. Combine all relevant signals found
-3. Assign a confidence score (0.0-1.0) for the analysis quality
-4. Provide clear reasoning notes
-5. DO NOT make the final compliance decision
-
-Return as JSON:
-{{
-  "signals": ["combined list of all relevant signals"],
-  "notes": "detailed reasoning and analysis",
-  "confidence": 0.85
-}}"""
-        
-        messages = [
-            {
-                "role": "system",
-                "content": system_msg
-            },
-            {
-                "role": "user",
-                "content": f"""Analyze this software feature for geographical regulatory compliance:
-
-**Feature:** {artifact.title}
-**Description:** {artifact.description}
-
-**Evidence FOR compliance (from finder analysis):**
-- Signals found: {', '.join(finder_out.signals)}
-- Regulatory claims: {json.dumps(finder_out.claims, indent=2)}
-
-**Evidence AGAINST compliance (from counter analysis):**
-- Counter-points: {', '.join(counter_out.counter_points)}
-- Missing signals: {', '.join(counter_out.missing_signals)}
-
-{instructions}"""
-            }
-        ]
-        
-        try:
-            response = await self.call_openai(messages)
-            content = response["choices"][0]["message"]["content"]
+        if settings.use_rag:
+            # Use simplified RAG for comprehensive judge analysis
+            rag = get_rag_system()
+            result = rag.simplified_rag.compliance_judge(
+                artifact.title, artifact.description,
+                finder_out.signals, finder_out.claims,
+                counter_out.counter_points, counter_out.missing_signals,
+                make_decision=make_decision
+            )
             
-            # Debug: print the raw response
-            print(f"⚖️  Judge raw response: {content[:200]}...")
-            
-            if not content or content.strip() == "":
-                print("⚠️  Empty response from Judge LLM")
-                all_signals = list(set(finder_out.signals + counter_out.missing_signals))
-                return JudgeOut(
-                    signals=all_signals,
-                    notes="Empty response from LLM",
-                    confidence=0.0
-                )
-            
-            result = json.loads(content)
-            
-            # Combine signals from finder and counter analysis
+            # Combine signals from finder and counter analysis as fallback
             all_signals = list(set(finder_out.signals + counter_out.missing_signals))
             
+            # Create JudgeOut object
             judge_out = JudgeOut(
                 signals=result.get("signals", all_signals),
-                notes=result.get("notes", "Analysis completed"),
+                notes=result.get("notes", "RAG analysis completed"),
                 confidence=result.get("confidence", 0.5)
             )
             
-            # If LLM is making decision, store it in the notes for later use
+            # If LLM is making decision, store it in the llm_decision field
             if make_decision and "requires_compliance" in result:
                 judge_out.llm_decision = result.get("requires_compliance", False)
             
             return judge_out
+        else:
+            # Direct LLM call without RAG
+            all_signals = list(set(finder_out.signals + counter_out.missing_signals))
             
-        except json.JSONDecodeError as e:
-            print(f"Judge JSON decode error: {e}")
-            print(f"Raw response: {content}")
-            all_signals = list(set(finder_out.signals + counter_out.missing_signals))
-            return JudgeOut(
-                signals=all_signals,
-                notes=f"JSON decode failed: {str(e)}",
-                confidence=0.0
-            )
-        except Exception as e:
-            print(f"Judge LLM call failed: {e}")
-            # Fallback logic
-            all_signals = list(set(finder_out.signals + counter_out.missing_signals))
-            return JudgeOut(
-                signals=all_signals,
-                notes=f"LLM analysis failed: {str(e)}",
-                confidence=0.0
-            )
+            prompt = f"""Feature: {artifact.title}
+FOR compliance: {', '.join(finder_out.signals[:3]) if finder_out.signals else 'none'}
+AGAINST compliance: {', '.join(counter_out.counter_points[:3]) if counter_out.counter_points else 'none'}
 
-# Initialize LLM client
-llm_client = LLMClient()
+Does this need compliance? Answer:
+- CONFIDENCE: High/Medium/Low
+- DECISION: Yes/No
+- REASON: Brief explanation"""
+            
+            messages = [{"role": "user", "content": prompt}]
+            # Use faster model for Direct mode
+            response = await self.call_openai(messages, model=self.direct_model)
+            
+            try:
+                content = response["choices"][0]["message"]["content"]
+                parsed = self._parse_judge_response(content, make_decision)
+                
+                judge_out = JudgeOut(
+                    signals=all_signals,
+                    notes=parsed.notes,
+                    confidence=parsed.confidence
+                )
+                
+                if make_decision:
+                    judge_out.llm_decision = parsed.llm_decision
+                
+                return judge_out
+            except (KeyError, Exception) as e:
+                print(f"Error parsing judge response: {e}")
+                return JudgeOut(
+                    signals=all_signals,
+                    notes="Analysis completed",
+                    confidence=0.5,
+                    llm_decision=False if make_decision else None
+                )
 
-# LangChain RAG System Only
+# Lazy initialization for LLM client
+_llm_client = None
+
+def get_llm_client():
+    global _llm_client
+    if _llm_client is None:
+        _llm_client = LLMClient()
+    return _llm_client
+
+# Simplified RAG System
 class RAGSystem:
     def __init__(self):
-        if not LANGCHAIN_AVAILABLE:
-            raise ImportError("LangChain is required. Please install: pip install langchain-openai langchain-pinecone")
+        if not RAG_AVAILABLE:
+            raise ImportError("RAG system is required. Please install: pip install langchain-openai langchain-chroma chromadb")
         
         if not settings.openai_api_key:
-            raise ValueError("OPENAI_API_KEY is required for LangChain RAG")
+            raise ValueError("OPENAI_API_KEY is required for RAG")
         
-        if not settings.pinecone_api_key:
-            raise ValueError("PINECONE_API_KEY is required for Pinecone vector store")
-        
-        # Initialize LangChain RAG with Pinecone
+        # Initialize Simplified RAG with Chroma
         try:
-            from langchain_rag import LangChainRAGSystem, LangChainRAGSettings
-            rag_settings = LangChainRAGSettings(
+            from langchain_rag import SimplifiedRAGSystem, SimplifiedRAGSettings
+            rag_settings = SimplifiedRAGSettings(
                 openai_api_key=settings.openai_api_key,
-                pinecone_api_key=settings.pinecone_api_key
+                chroma_persist_directory=settings.chroma_persist_directory,
+                database_path=settings.database_path
             )
-            self.langchain_rag = LangChainRAGSystem(settings=rag_settings)
-            print("✅ LangChain RAG initialized successfully - will use Pinecone vector search")
+            self.simplified_rag = SimplifiedRAGSystem(settings=rag_settings)
+            print("✅ Simplified RAG initialized successfully - using Chroma vector search")
         except Exception as e:
-            print(f"❌ LangChain RAG initialization failed: {e}")
+            print(f"❌ RAG initialization failed: {e}")
             raise
         
         self.chunks = []
@@ -640,7 +647,7 @@ class RAGSystem:
             )
             self.chunks.append(chunk)
         
-        # Convert to ScrapedDocument format for LangChain
+        # Convert to ScrapedDocument format for simplified RAG
         try:
             from langchain_rag import ScrapedDocument
             from datetime import datetime
@@ -659,37 +666,37 @@ class RAGSystem:
                 )
                 scraped_docs.append(scraped_doc)
             
-            # Index into LangChain RAG
+            # Index into simplified RAG
             import asyncio
-            indexed_count = asyncio.run(self.langchain_rag.index_scraped_documents(scraped_docs))
-            print(f"📚 Indexed {indexed_count} chunks into LangChain RAG system")
+            indexed_count = asyncio.run(self.simplified_rag.index_scraped_documents(scraped_docs))
+            print(f"📚 Indexed {indexed_count} chunks into simplified RAG system")
             return indexed_count
             
         except Exception as e:
-            print(f"❌ Could not index documents into LangChain RAG: {e}")
+            print(f"❌ Could not index documents into RAG: {e}")
             raise
     
     def retrieve(self, query: str, k: int = 6) -> List[Chunk]:
         try:
-            # Use LangChain's vector retrieval
-            docs = self.langchain_rag.retrieve(query, k)
+            # Use simplified RAG's vector retrieval
+            docs = self.simplified_rag.retrieve(query, k)
             
             # Convert back to Chunk format for compatibility
             relevant_chunks = []
             for doc in docs:
                 chunk = Chunk(
-                    id=f"langchain_{len(relevant_chunks)}",
+                    id=f"rag_{len(relevant_chunks)}",
                     content=doc.page_content,
                     source=doc.metadata.get('url', 'unknown'),
                     metadata=doc.metadata
                 )
                 relevant_chunks.append(chunk)
             
-            print(f"🔍 LangChain RAG found {len(relevant_chunks)} relevant legal documents")
+            print(f"🔍 Simplified RAG found {len(relevant_chunks)} relevant legal documents")
             return relevant_chunks
             
         except Exception as e:
-            print(f"❌ LangChain retrieval failed: {e}")
+            print(f"❌ RAG retrieval failed: {e}")
             return []
     
     
@@ -731,11 +738,8 @@ class ScrapingAggregator:
         # Initialize Exa client if available
         if EXA_AVAILABLE and settings.exa_api_key:
             try:
-                if 'ExaSDKClient' in globals():
-                    self.exa_client = ExaSDKClient()
-                else:
-                    self.exa_client = ExaClient()
-                print("✅ Exa client initialized")
+                self.exa_client = ExaSDKClient()
+                print("✅ Exa SDK client initialized")
             except Exception as e:
                 print(f"⚠️  Failed to initialize Exa client: {e}")
     
@@ -861,22 +865,31 @@ class ScrapingAggregator:
             print(f"\n📋 Processing with LangChain RAG ({refresh_mode}): {name} ({jurisdiction})")
             
             try:
-                # Use LangChain RAG to find URLs, scrape, and index documents
-                indexed_count = await rag_system.langchain_rag.index_regulation_from_search_apis(
-                    name, jurisdiction, self.perplexity_client, self.exa_client, force_refresh=force_refresh, skip_indexing=settings.skip_indexing
+                # Use simplified RAG to find URLs, scrape, and index documents
+                rag = get_rag_system()
+                
+                # Prepare search clients list
+                search_clients = []
+                if self.perplexity_client:
+                    search_clients.append(self.perplexity_client)
+                if self.exa_client:
+                    search_clients.append(self.exa_client)
+                
+                indexed_count = await rag.simplified_rag.index_regulation_from_search_apis(
+                    name, jurisdiction, search_clients, force_refresh=force_refresh, skip_indexing=settings.skip_indexing
                 )
                 sources_count[f"{name}_{jurisdiction}"] = indexed_count
                 total_indexed += indexed_count
                 
             except Exception as e:
-                print(f"⚠️  LangChain RAG processing failed for {name}: {e}")
+                print(f"⚠️  RAG processing failed for {name}: {e}")
                 sources_count[f"{name}_{jurisdiction}"] = 0
         
         return {
             "ingested": total_indexed,
             "regulations_processed": len(regulations),
             "sources": sources_count,
-            "system": "langchain_rag",
+            "system": "simplified_rag",
             "force_refresh": force_refresh
         }
     
@@ -900,14 +913,14 @@ class ScrapingAggregator:
         
         # Index all documents into the RAG system
         if all_docs:
-            indexed_count = rag_system.index_documents(all_docs)
+            indexed_count = get_rag_system().index_documents(all_docs)
             print(f"\n📚 Successfully indexed {indexed_count} documents from {len(sources_count)} regulations")
         
         return {
             "ingested": len(all_docs),
             "regulations_processed": len(sources_count),
             "sources": sources_count,
-            "system": "langchain_rag"
+            "system": "simplified_rag"
         }
     
     async def close(self):
@@ -917,9 +930,25 @@ class ScrapingAggregator:
         if self.exa_client and hasattr(self.exa_client, 'close'):
             await self.exa_client.close()
 
-# Initialize systems
-rag_system = RAGSystem()
-scraping_aggregator = ScrapingAggregator()
+# Lazy initialization for systems
+_rag_system = None
+_scraping_aggregator = None
+
+def get_rag_system():
+    global _rag_system
+    if _rag_system is None:
+        print("🔄 Initializing RAG system (lazy load)...")
+        _rag_system = RAGSystem()
+        print("✅ RAG system initialized")
+    return _rag_system
+
+def get_scraping_aggregator():
+    global _scraping_aggregator
+    if _scraping_aggregator is None:
+        print("🔄 Initializing scraping aggregator (lazy load)...")
+        _scraping_aggregator = ScrapingAggregator()
+        print("✅ Scraping aggregator initialized")
+    return _scraping_aggregator
 
 # Evidence System
 class EvidenceSystem:
@@ -1000,20 +1029,31 @@ class EvidenceSystem:
         
         return zip_buffer.getvalue()
 
-evidence_system = EvidenceSystem()
+# Lazy initialization for evidence system
+_evidence_system = None
+
+def get_evidence_system():
+    global _evidence_system
+    if _evidence_system is None:
+        _evidence_system = EvidenceSystem()
+    return _evidence_system
 
 # Core Analysis Function
 async def analyze(artifact: FeatureArtifact) -> Decision:
-    # Extract signals
-    sigs = signal_extractor.extract_signals(artifact)
+    # Extract signals using pattern matching
+    sigs = get_signal_extractor().extract_signals(artifact)
     
-    # RAG retrieval
-    query = " ".join([artifact.title, artifact.description] + sigs.hints)
-    chunks = rag_system.retrieve(query, k=settings.rag_topk)
+    # Log which mode we're using
+    mode = "LangChain RAG" if settings.use_rag else "Direct LLM"
+    print(f"🤖 Using {mode} for compliance analysis of {artifact.feature_id}")
     
-    # LLM ensemble
-    finder_out = await llm_client.finder(artifact, chunks)
-    counter_out = await llm_client.counter(artifact, chunks)
+    # For backward compatibility, pass empty chunks since LLMClient now uses RAG internally
+    empty_chunks = []
+    
+    # Run LLM ensemble analysis
+    llm_client = get_llm_client()
+    finder_out = await llm_client.finder(artifact, empty_chunks)
+    counter_out = await llm_client.counter(artifact, empty_chunks)
     
     # Toggle: LLM vs Rules Engine decision
     use_llm_decision = not settings.use_rules_engine
@@ -1024,10 +1064,10 @@ async def analyze(artifact: FeatureArtifact) -> Decision:
         # LLM makes the final decision
         needs_compliance = judge_out.llm_decision if judge_out.llm_decision is not None else False
         reasoning = judge_out.notes
-        regulations = []  # Extract from finder_out.claims if needed
-        matched_rules = ["LLM_DECISION"]
+        matched_rules = ["SIMPLIFIED_RAG_DECISION"]
         
-        # Extract regulations from LLM claims
+        # Extract regulations from finder claims
+        regulations = []
         for claim in finder_out.claims:
             if isinstance(claim, dict) and "regulation" in claim:
                 regulations.append(claim["regulation"])
@@ -1035,21 +1075,31 @@ async def analyze(artifact: FeatureArtifact) -> Decision:
     else:
         # Rules engine makes the final decision (original behavior)
         text = f"{artifact.title} {artifact.description}"
-        verdict = rules_engine.evaluate(sigs, text)
+        verdict = get_rules_engine().evaluate(sigs, text)
         needs_compliance = verdict.ok
         reasoning = verdict.reason
         regulations = verdict.regulations
         matched_rules = verdict.matched_ids
     
-    # Create decision
+    # Combine all signals from pattern matching and LangChain RAG
     all_signals = list(set(sigs.to_list() + judge_out.signals))
+    
+    # Create citations from finder results
+    citations = []
+    for citation_ref in finder_out.citations[:3]:
+        citations.append(Citation(
+            source=citation_ref,
+            snippet="RAG retrieved document"
+        ))
+    
+    # Create decision
     decision = Decision(
         feature_id=artifact.feature_id,
         needs_geo_compliance=needs_compliance,
         reasoning=reasoning,
         regulations=regulations,
         signals=all_signals,
-        citations=rag_system.hydrate_citations(finder_out.citations[:3]),
+        citations=citations,
         confidence=judge_out.confidence,
         matched_rules=matched_rules,
         ts=get_utc_timestamp(),
@@ -1057,7 +1107,19 @@ async def analyze(artifact: FeatureArtifact) -> Decision:
     )
     
     # Write receipt and set hash
-    decision.hash = evidence_system.write_receipt(decision)
+    decision.hash = get_evidence_system().write_receipt(decision)
+    
+    # Store in database if using RAG
+    if settings.use_rag:
+        try:
+            rag = get_rag_system()
+            rag.simplified_rag.store_analysis(
+                decision.feature_id, decision.needs_geo_compliance, decision.confidence,
+                decision.reasoning, decision.regulations, decision.signals,
+                [c.source for c in decision.citations], session_id="main_analysis"
+            )
+        except Exception as e:
+            print(f"⚠️  Failed to store analysis in database: {e}")
     
     return decision
 
@@ -1074,15 +1136,82 @@ async def health():
     return {
         "ok": True,
         "rules_hash": rules_hash,
-        "mem0_docs": len(rag_system.chunks),
+        "mem0_docs": len(get_rag_system().chunks),
         "policy_version": settings.policy_version
+    }
+
+@app.get("/api/rag_status")
+async def get_rag_status():
+    """Get current RAG toggle status"""
+    return {
+        "use_rag": settings.use_rag,
+        "description": "RAG (Retrieval-Augmented Generation) is currently " + ("enabled" if settings.use_rag else "disabled")
+    }
+
+@app.post("/api/test_llm")
+async def test_llm():
+    """Test direct LLM call with simple prompt"""
+    from openai import AsyncOpenAI
+    import asyncio
+    
+    client = AsyncOpenAI(api_key=settings.openai_api_key)
+    
+    try:
+        print("🧪 Testing direct LLM call...")
+        response = await asyncio.wait_for(
+            client.chat.completions.create(
+                model="gpt-5-2025-08-07",
+                messages=[{"role": "user", "content": "Say 'Hello'"}],
+                max_completion_tokens=10
+            ),
+            timeout=5
+        )
+        
+        content = response.choices[0].message.content
+        print(f"✅ LLM responded: {content}")
+        return {"success": True, "response": content}
+    except asyncio.TimeoutError:
+        print("⏱️ LLM timeout")
+        return {"success": False, "error": "Timeout after 5 seconds"}
+    except Exception as e:
+        print(f"❌ LLM error: {e}")
+        return {"success": False, "error": str(e)}
+
+@app.post("/api/toggle_rag")
+async def toggle_rag(enable: bool = None):
+    """Toggle RAG on or off, or explicitly set it"""
+    if enable is None:
+        settings.use_rag = not settings.use_rag
+    else:
+        settings.use_rag = enable
+    
+    status = "enabled" if settings.use_rag else "disabled"
+    print(f"🔄 RAG has been {status}")
+    
+    return {
+        "use_rag": settings.use_rag,
+        "message": f"RAG has been {status}. This will affect all subsequent analyze calls."
     }
 
 @app.post("/api/analyze")
 async def analyze_endpoint(artifact: FeatureArtifact) -> Decision:
+    import time
+    start_time = time.time()
+    
     try:
-        return await analyze(artifact)
+        mode = "RAG" if settings.use_rag else "Direct"
+        print(f"🔍 Starting {mode} analysis for feature: {artifact.feature_id}")
+        result = await analyze(artifact)
+        
+        end_time = time.time()
+        duration = end_time - start_time
+        print(f"✅ {mode} analysis completed for {artifact.feature_id} in {duration:.2f} seconds")
+        
+        return result
     except Exception as e:
+        end_time = time.time()
+        duration = end_time - start_time
+        print(f"❌ Analysis failed for {artifact.feature_id} after {duration:.2f} seconds: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.post("/api/bulk_analyze")
@@ -1101,7 +1230,7 @@ async def bulk_analyze(request: Dict[str, List[FeatureArtifact]]):
             continue
     
     # Export to CSV
-    csv_path = evidence_system.export_csv(decisions)
+    csv_path = get_evidence_system().export_csv(decisions)
     
     return {
         "count": len(decisions),
@@ -1111,7 +1240,7 @@ async def bulk_analyze(request: Dict[str, List[FeatureArtifact]]):
 @app.get("/api/evidence")
 async def get_evidence(feature_id: Optional[str] = None):
     try:
-        zip_data = evidence_system.make_evidence_zip(feature_id)
+        zip_data = get_evidence_system().make_evidence_zip(feature_id)
         return Response(
             content=zip_data,
             media_type="application/zip",
@@ -1130,96 +1259,37 @@ async def refresh_corpus():
         
         regulations = inputs_config.get('regulations', [])
         if not regulations:
-            # Fallback to mock data if no configuration
-            return await refresh_corpus_fallback()
+            return {"error": "No regulations configured in inputs.yaml", "ingested": 0}
         
         # Use the scraping aggregator to research all regulations
-        result = await scraping_aggregator.refresh_corpus_for_regulations(regulations)
+        scraping = get_scraping_aggregator()
+        result = await scraping.refresh_corpus_for_regulations(regulations)
         
         return result
         
     except Exception as e:
         print(f"⚠️  Failed to refresh corpus from inputs.yaml: {e}")
-        # Fallback to mock data
-        return await refresh_corpus_fallback()
+        return {"error": str(e), "ingested": 0}
 
-async def refresh_corpus_fallback():
-    """Fallback corpus refresh with mock data"""
-    mock_docs = [
-        RawDoc(
-            url="https://eur-lex.europa.eu/legal-content/EN/TXT/?uri=CELEX%3A32022R2065",
-            content="""EU Digital Services Act (DSA) Article 38 - Recommender Systems Transparency:
-
-1. Recipients of the service shall be able to easily understand when information is being prioritised based on profiling as defined in Article 4(4) of Regulation (EU) 2016/679.
-
-2. For each of their recommender systems, providers of online platforms shall set out in their terms and conditions, in plain and intelligible language:
-   (a) the main parameters used in their recommender systems, as well as any options for the recipients of the service to modify or influence those main parameters, including at least one option which is not based on profiling;
-   (b) how to access and use the options referred to in point (a).
-
-3. Providers of online platforms shall provide recipients of their service with at least one option for each of their recommender systems that is not based on profiling. That option shall be prominently displayed and easily accessible.
-
-4. Very large online platforms shall provide recipients with easily accessible functionality that allows them to view content that is not recommended on the basis of profiling or categorisation of the recipient.
-
-Article 39 - Risk Assessment:
-Very large online platforms shall diligently identify, analyse and assess any systemic risks in the Union stemming from the design or functioning of their service and its related systems, including algorithmic systems, or from the use made of their service. Those assessments shall include the following systemic risks:
-(a) the dissemination of illegal content;
-(b) any actual or foreseeable negative effects for the exercise of fundamental rights;
-(c) intentional manipulation of their service, including by means of inauthentic use or automated exploitation of the service.""",
-            title="EU Digital Services Act - Recommender Systems & Risk Assessment",
-            metadata={"jurisdiction": "EU", "topic": "recommender_systems", "compliance_areas": "profiling,transparency,risk_assessment"}
-        ),
-        RawDoc(
-            url="https://leginfo.legislature.ca.gov/faces/billTextClient.xhtml?bill_id=202320240SB976",
-            content="""California SB976 - Social Media Platforms: Children
-SEC. 2. Chapter 22.1 (commencing with Section 22675) is added to Division 8 of the Business and Professions Code, to read:
-
-22675. For purposes of this chapter:
-(a) "Child" means a natural person under 18 years of age.
-(b) "Social media platform" means an internet website or application that is primarily used for social networking and allows users to view and post content, communicate with other users, and join communities.
-
-22676. (a) A social media platform shall not use the personal information of a child to provide advertising that is targeted to that child.
-(b) A social media platform shall not use any system design feature that the platform knows, or should know, causes or is reasonably likely to cause addiction-like behavior by children on the platform.
-
-22677. (a) A social media platform shall provide, by default, the highest privacy settings for child users and shall require affirmative consent before reducing those privacy protections.
-(b) A social media platform shall not send notifications to a child between the hours of 12 a.m. and 6 a.m. or during school hours, unless there is an imminent threat to the child's physical safety.
-
-22678. Enforcement and Civil Penalties:
-(a) A violation of this chapter constitutes an unlawful business practice under Section 17200.
-(b) The Attorney General may seek civil penalties up to $25,000 per affected child for each violation.
-(c) A child or parent may bring a civil action for violations, seeking actual damages or $1,000, whichever is greater.""",
-            title="California SB976 - Social Media Child Protection",
-            metadata={"jurisdiction": "CA", "topic": "minors_protection", "compliance_areas": "targeted_advertising,privacy,parental_controls,penalties"}
-        )
-    ]
-    
-    indexed_count = rag_system.index_documents(mock_docs)
-    
-    return {
-        "ingested": indexed_count,
-        "sources": {
-            "EU-DSA": 1,
-            "CA-SB976": 1
-        }
-    }
 
 @app.get("/api/rag_status")
 async def get_rag_status():
     """Debug endpoint to check RAG system status"""
     try:
-        # Get LangChain RAG status
+        # Get simplified RAG status
         return {
-            "system": "langchain",
-            "langchain_initialized": True,
-            "chunks_available": len(rag_system.chunks),
-            "vectorstore_available": rag_system.langchain_rag.vectorstore is not None,
-            "rag_chain_available": rag_system.langchain_rag.rag_chain is not None
+            "system": "simplified_rag",
+            "rag_initialized": True,
+            "chunks_available": len(get_rag_system().chunks),
+            "vectorstore_available": get_rag_system().simplified_rag.vectorstore is not None,
+            "rag_chain_available": get_rag_system().simplified_rag.rag_chain is not None
         }
         
     except Exception as e:
         return {
             "error": str(e),
-            "system": "langchain",
-            "chunks_available": len(rag_system.chunks)
+            "system": "simplified_rag",
+            "chunks_available": 0
         }
 
 # Initialize with some sample data
