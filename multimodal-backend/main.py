@@ -14,7 +14,7 @@ import csv
 import io
 import pymysql
 
-from fastapi import FastAPI, File, UploadFile, HTTPException, BackgroundTasks, Form
+from fastapi import FastAPI, File, UploadFile, HTTPException, BackgroundTasks, Form, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel, Field
@@ -108,6 +108,10 @@ class LegalAnalysisResult(BaseModel):
     compliance_requirements: List[str] = Field(default=[], description="Specific compliance requirements")
     recommendations: List[str] = Field(default=[], description="Implementation recommendations")
     detailed_analysis: str = Field(..., description="Detailed legal analysis text")
+
+
+class BulkAnalyzeRequest(BaseModel):
+    items: List[Dict[str, Any]] = Field(..., description="List of feature items to analyze")
 
 
 # Helper functions
@@ -590,6 +594,130 @@ async def generate_audit_trail(feature: ProjectAnalysis):
         raise HTTPException(status_code=500, detail=f"Audit trail generation failed: {str(e)}")
 
 
+@app.post("/api/bulk-analyze")
+async def bulk_analyze(background_tasks: BackgroundTasks, request: BulkAnalyzeRequest):
+    """Bulk analysis from parsed JSON features"""
+    try:
+        features = request.items
+        
+        if not features:
+            raise HTTPException(status_code=400, detail="No features provided")
+        
+        # Convert features to analysis tasks
+        tasks = []
+        for feature in features:
+            # Map feature data to our ProjectAnalysis structure
+            task = {
+                "project_name": feature.get('Summary', ''),
+                "summary": f"{feature.get('Issue Type', '')} - {feature.get('Summary', '')}",
+                "project_description": f"Issue: {feature.get('Issue key', '')} - {feature.get('Summary', '')}. Priority: {feature.get('Priority', '')}. Status: {feature.get('Status', '')}",
+                "project_type": feature.get('Issue Type', ''),
+                "priority": feature.get('Priority', ''),
+                "due_date": feature.get('Due date', ''),
+            }
+            
+            # Only include tasks with meaningful content
+            if task["project_name"]:
+                tasks.append(task)
+        
+        if not tasks:
+            raise HTTPException(status_code=400, detail="No valid tasks found in data")
+        
+        # Generate task ID for bulk operation
+        task_id = generate_task_id()
+        
+        # Initialize bulk task status
+        task_results[task_id] = {
+            "task_id": task_id,
+            "status": "pending",
+            "created_at": datetime.utcnow(),
+            "task_type": "bulk_analysis",
+            "total_items": len(tasks),
+            "completed_items": 0,
+            "results": []
+        }
+        
+        # Start background bulk analysis
+        background_tasks.add_task(
+            run_bulk_analysis_task,
+            task_id=task_id,
+            tasks=tasks
+        )
+        
+        return {
+            "task_id": task_id,
+            "status": "pending",
+            "message": f"Bulk analysis started for {len(tasks)} items",
+            "total_items": len(tasks)
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Bulk analysis failed: {str(e)}")
+
+
+@app.post("/api/bulk-csv-analysis-json")
+async def bulk_csv_analysis_json(background_tasks: BackgroundTasks, request: BulkAnalyzeRequest):
+    """Bulk analysis from JSON data"""
+    try:
+        features = request.items
+        
+        if not features:
+            raise HTTPException(status_code=400, detail="No features provided")
+        
+        # Convert features to analysis tasks
+        tasks = []
+        for feature in features:
+            task = {
+                "project_name": feature.get('Summary', ''),
+                "summary": f"{feature.get('Issue Type', '')} - {feature.get('Summary', '')}",
+                "project_description": f"Issue: {feature.get('Issue key', '')} - {feature.get('Summary', '')}. Priority: {feature.get('Priority', '')}. Status: {feature.get('Status', '')}",
+                "project_type": feature.get('Issue Type', ''),
+                "priority": feature.get('Priority', ''),
+                "due_date": feature.get('Due date', ''),
+            }
+            
+            if task["project_name"]:
+                tasks.append(task)
+        
+        if not tasks:
+            raise HTTPException(status_code=400, detail="No valid tasks found in data")
+        
+        # Generate task ID for bulk operation
+        task_id = generate_task_id()
+        
+        # Initialize bulk task status
+        task_results[task_id] = {
+            "task_id": task_id,
+            "status": "pending",
+            "created_at": datetime.utcnow(),
+            "task_type": "bulk_analysis",
+            "total_items": len(tasks),
+            "completed_items": 0,
+            "results": []
+        }
+        
+        # Start background bulk analysis
+        background_tasks.add_task(
+            run_bulk_analysis_task,
+            task_id=task_id,
+            tasks=tasks
+        )
+        
+        return {
+            "task_id": task_id,
+            "status": "pending",
+            "message": f"Bulk analysis started for {len(tasks)} items",
+            "total_items": len(tasks)
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Bulk analysis failed: {str(e)}")
+
+
 @app.post("/api/bulk-csv-analysis")
 async def bulk_csv_analysis(background_tasks: BackgroundTasks, file: UploadFile = File(...)):
     """Bulk analysis from CSV file upload"""
@@ -655,6 +783,70 @@ async def bulk_csv_analysis(background_tasks: BackgroundTasks, file: UploadFile 
         raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"CSV bulk analysis failed: {str(e)}")
+
+
+async def run_bulk_analysis_task(task_id: str, tasks: List[Dict]):
+    """Background task for running bulk analysis"""
+    try:
+        task_results[task_id]["status"] = "running"
+        results = []
+        compliance_required = 0
+        no_compliance = 0
+        
+        for i, task in enumerate(tasks):
+            try:
+                # Run comprehensive analysis on each task
+                result = multimodal_crew.analyze_comprehensive_compliance(task)
+                
+                # Determine compliance status for summary
+                compliance_status = result.get("compliance_status", "unknown").lower()
+                if "compliance" in compliance_status and "required" in compliance_status:
+                    compliance_required += 1
+                else:
+                    no_compliance += 1
+                
+                results.append({
+                    "feature_name": task["project_name"],
+                    "analysis_result": result,
+                    "timestamp": datetime.utcnow().isoformat(),
+                    "success": True
+                })
+                
+                # Update progress
+                task_results[task_id]["completed_items"] = i + 1
+                
+            except Exception as e:
+                results.append({
+                    "feature_name": task["project_name"],
+                    "error": str(e),
+                    "timestamp": datetime.utcnow().isoformat(),
+                    "success": False
+                })
+                no_compliance += 1  # Count errors as no compliance for now
+        
+        # Generate CSV output path (for potential download)
+        timestamp = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
+        csv_path = f"results/bulk_analysis_{timestamp}.csv"
+        
+        # Mark as completed with summary
+        task_results[task_id].update({
+            "status": "completed",
+            "completed_at": datetime.utcnow(),
+            "results": results,
+            "count": len(tasks),
+            "compliance_required": compliance_required,
+            "no_compliance": no_compliance,
+            "csv_path": csv_path,
+            "success_count": len([r for r in results if r["success"]]),
+            "failure_count": len([r for r in results if not r["success"]])
+        })
+        
+    except Exception as e:
+        task_results[task_id].update({
+            "status": "failed",
+            "completed_at": datetime.utcnow(),
+            "error": str(e)
+        })
 
 
 async def run_bulk_csv_analysis_task(task_id: str, tasks: List[Dict]):
