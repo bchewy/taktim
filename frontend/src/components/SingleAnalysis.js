@@ -24,7 +24,7 @@ const SingleAnalysis = () => {
     const [accordionState, setAccordionState] = useState({
         legalResearch: true, // Start with legal research expanded
         geoRegulatory: false,
-        documentationTrail: false,
+        documentationTrail: true, // Start with documentation trail expanded
         complianceStatus: true, // Start with compliance status expanded
     });
 
@@ -59,11 +59,6 @@ const SingleAnalysis = () => {
             if (stageIndex < stages.length - 1) {
                 stageIndex++;
                 setCurrentStage(stages[stageIndex]);
-            } else {
-                // On final stage, show "Results Ready" after a delay
-                setTimeout(() => {
-                    setShowResultsReady(true);
-                }, 1500);
             }
         }, 2000);
 
@@ -95,13 +90,14 @@ const SingleAnalysis = () => {
             console.error("Analysis failed:", error);
             setResult({ error: "Analysis failed. Please try again." });
         } finally {
-            // Delay to show results ready state, keep feature details collapsed
+            // Show results ready immediately when we have results, then transition
+            setShowResultsReady(true);
             setTimeout(() => {
                 setIsAnalyzing(false);
                 setCurrentStage('initializing');
                 setShowResultsReady(false);
                 // Keep feature details collapsed after analysis
-            }, 1000);
+            }, 2000); // Longer delay to show "Ready to view results"
         }
     };
 

@@ -17,7 +17,7 @@ const AgentVisualization = ({ isActive, stage, analysisType = 'single' }) => {
       name: 'Legal Research Agent',
       icon: Search,
       color: 'blue',
-      position: { x: 20, y: 20 },
+      position: { x: 15, y: 15 },
       personality: '🕵️ "Time to dig into Congress.gov!"',
       role: 'Government API Integration'
     },
@@ -35,7 +35,7 @@ const AgentVisualization = ({ isActive, stage, analysisType = 'single' }) => {
       name: 'Multimodal Crew Lead',
       icon: Users,
       color: 'purple',
-      position: { x: 50, y: 20 },
+      position: { x: 50, y: 15 },
       personality: '🎯 "Coordinating the team!"',
       role: 'Agent Orchestration'
     },
@@ -44,7 +44,7 @@ const AgentVisualization = ({ isActive, stage, analysisType = 'single' }) => {
       name: 'Chat Agent',
       icon: Bot,
       color: 'indigo',
-      position: { x: 80, y: 40 },
+      position: { x: 85, y: 35 },
       personality: '💬 "Ready to chat with users!"',
       role: 'User Interaction'
     },
@@ -53,7 +53,7 @@ const AgentVisualization = ({ isActive, stage, analysisType = 'single' }) => {
       name: 'Audit Trail Generator',
       icon: FileText,
       color: 'orange',
-      position: { x: 20, y: 60 },
+      position: { x: 15, y: 60 },
       personality: '📋 "Creating evidence trail..."',
       role: 'Regulatory Documentation'
     }
@@ -174,7 +174,7 @@ const AgentVisualization = ({ isActive, stage, analysisType = 'single' }) => {
       </div>
 
       {/* Agent Network Visualization */}
-      <div className="relative h-80 bg-white rounded-lg border border-gray-200 mb-4 overflow-hidden">
+      <div className="relative h-[500px] bg-white rounded-lg border border-gray-200 mb-4 overflow-hidden">
         {/* Connection Lines */}
         <svg className="absolute inset-0 w-full h-full pointer-events-none">
           {connections.map((conn, index) => {
@@ -212,15 +212,15 @@ const AgentVisualization = ({ isActive, stage, analysisType = 'single' }) => {
               >
                 <Icon className="w-8 h-8" />
               </div>
-              <div className="absolute top-full left-1/2 transform -translate-x-1/2 mt-2 text-center">
+              <div className="absolute top-full left-1/2 transform -translate-x-1/2 mt-6 text-center min-w-36 max-w-40">
                 <div className="text-xs font-medium text-gray-900 whitespace-nowrap">
                   {agent.name}
                 </div>
-                <div className="text-xs text-gray-500 whitespace-nowrap">
+                <div className="text-xs text-gray-500 whitespace-nowrap mb-1">
                   {agent.role}
                 </div>
                 {stageAgentMap[stage]?.includes(agent.id) && (
-                  <div className="text-xs font-medium text-blue-600 mt-1 animate-bounce">
+                  <div className="text-xs font-medium text-blue-600 mt-3 animate-bounce bg-blue-50 px-2 py-1 rounded-md border border-blue-200 shadow-sm">
                     {agent.personality}
                   </div>
                 )}

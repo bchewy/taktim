@@ -28,7 +28,7 @@ const ResultsReady = () => {
           🎉 Analysis Complete!
         </h3>
         <p className="text-gray-600 text-lg">
-          Your compliance analysis has been successfully processed
+          Results are ready and will be displayed shortly
         </p>
         
         {/* Agent Completion Status */}
@@ -60,12 +60,10 @@ const ResultsReady = () => {
           </p>
         </div>
 
-        {/* Loading dots for smooth transition */}
-        <div className="flex items-center justify-center space-x-1 mt-6">
-          <div className="w-2 h-2 bg-blue-500 rounded-full animate-bounce"></div>
-          <div className="w-2 h-2 bg-blue-500 rounded-full animate-bounce" style={{ animationDelay: '0.1s' }}></div>
-          <div className="w-2 h-2 bg-blue-500 rounded-full animate-bounce" style={{ animationDelay: '0.2s' }}></div>
-          <span className="ml-3 text-gray-500 text-sm">Preparing results...</span>
+        {/* Success indicator */}
+        <div className="flex items-center justify-center space-x-2 mt-6">
+          <CheckCircle className="w-5 h-5 text-green-600" />
+          <span className="text-green-700 font-medium">Ready to view results!</span>
         </div>
       </div>
     </div>
