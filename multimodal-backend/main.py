@@ -12,6 +12,7 @@ from typing import Dict, List, Optional, Any
 import json
 import csv
 import io
+import pymysql
 
 from fastapi import FastAPI, File, UploadFile, HTTPException, BackgroundTasks, Form
 from fastapi.middleware.cors import CORSMiddleware
@@ -142,6 +143,36 @@ async def run_analysis_task(task_id: str,
             "completed_at": datetime.utcnow(),
             "error": str(e)
         })
+
+
+# Database connection setup using PyMySQL
+def connect_db():
+    return pymysql.connect(
+        host=os.getenv("DB_HOST", "localhost"),
+        user=os.getenv("DB_USER", "root"),
+        password=os.getenv("DB_PASSWORD", "password"),
+        database=os.getenv("DB_NAME", "analysis_db"),
+        port=int(os.getenv("DB_PORT", 3306)),
+        cursorclass=pymysql.cursors.DictCursor,
+    )
+
+def save_analysis_to_db(feature_name: str, result: dict):
+    """Save analysis result to the database using PyMySQL"""
+    try:
+        db = connect_db()
+        with db.cursor() as cursor:
+            # Insert or update the result in the database
+            query = """
+            INSERT INTO features (feature_name, result)
+            VALUES (%s, %s)
+            """
+            cursor.execute(query, (feature_name, json.dumps(result)))
+            db.commit()
+
+    except pymysql.MySQLError as err:
+        print(f"Error: {err}")
+    finally:
+        db.close()
 
 
 # API Routes
@@ -460,6 +491,9 @@ async def comprehensive_compliance_analysis(feature: ProjectAnalysis):
         # Run comprehensive analysis (Legal + Geo-Regulatory) with tracking
         result = multimodal_crew.analyze_comprehensive_compliance(feature_data)
         
+        # Save result to the database
+        save_analysis_to_db(feature.project_name, result=result)
+
         # Complete tracking
         complete_analysis_tracking(session_id)
         
@@ -667,6 +701,37 @@ async def run_bulk_csv_analysis_task(task_id: str, tasks: List[Dict]):
             "completed_at": datetime.utcnow(),
             "error": str(e)
         })
+
+
+@app.get("/api/features")
+async def get_all_features():
+    """Retrieve all feature data from the database"""
+    try:
+        db = connect_db()
+        with db.cursor() as cursor:
+            query = "SELECT id, feature_name, result, timestamp FROM features;"
+            cursor.execute(query)
+            results = cursor.fetchall()
+
+            if not results:
+                raise HTTPException(status_code=404, detail="No feature data found")
+
+            return {
+                "features": [
+                    {
+                        "id": row["id"],
+                        "feature_name": row["feature_name"],
+                        "result": json.loads(row["result"]),
+                        "timestamp": row["timestamp"].isoformat()
+                    }
+                    for row in results
+                ]
+            }
+
+    except pymysql.MySQLError as err:
+        raise HTTPException(status_code=500, detail=f"Database error: {str(err)}")
+    finally:
+        db.close()
 
 
 if __name__ == "__main__":
