@@ -123,7 +123,7 @@ const AgentVisualization = ({ isActive, stage, analysisType = 'single' }) => {
       const randomMsg = agentMsgs[Math.floor(Math.random() * agentMsgs.length)]
       
       setMessages(prev => [...prev.slice(-2), {
-        id: Date.now(),
+        id: `${Date.now()}-${Math.random()}`,
         agent: agent,
         message: randomMsg,
         timestamp: new Date()

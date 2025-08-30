@@ -1,7 +1,6 @@
 import React from 'react';
-import { Link } from 'react-router-dom';
 
-const Dashboard = () => {
+const Dashboard = ({ onNavigate }) => {
   return (
     <div>
       <div className="mb-8">
@@ -56,24 +55,24 @@ const Dashboard = () => {
         <div className="bg-white p-6 rounded-lg shadow">
           <h2 className="text-xl font-semibold text-gray-900 mb-4">Quick Actions</h2>
           <div className="space-y-4">
-            <Link 
-              to="/single-analysis" 
+            <button 
+              onClick={() => onNavigate && onNavigate('analysis')}
               className="block w-full bg-blue-600 text-white text-center py-3 px-4 rounded-lg hover:bg-blue-700 transition-colors"
             >
               Start Single Feature Analysis
-            </Link>
-            <Link 
-              to="/bulk-analysis" 
+            </button>
+            <button 
+              onClick={() => onNavigate && onNavigate('bulk')}
               className="block w-full bg-green-600 text-white text-center py-3 px-4 rounded-lg hover:bg-green-700 transition-colors"
             >
               Bulk Feature Analysis
-            </Link>
-            <Link 
-              to="/results" 
+            </button>
+            <button 
+              onClick={() => onNavigate && onNavigate('audit')}
               className="block w-full bg-purple-600 text-white text-center py-3 px-4 rounded-lg hover:bg-purple-700 transition-colors"
             >
-              View Analysis Results
-            </Link>
+              View Audit Trail
+            </button>
           </div>
         </div>
       </div>
