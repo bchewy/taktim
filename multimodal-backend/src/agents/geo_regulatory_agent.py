@@ -24,7 +24,7 @@ sys.path.append(str(Path(__file__).parent.parent))
 from utils.geo_regulatory_database import GeoRegulatoryDatabase, RiskLevel, ComplianceStatus, GeographicCompliance
 
 @tool("geo_compliance_mapping")
-def geo_compliance_mapping_tool(target_markets: str, feature_characteristics: str, feature_name: str = "Unknown Feature") -> str:
+def geo_compliance_mapping_tool(target_markets: str, feature_characteristics: str, project_name: str = "Unknown Project") -> str:
     """Map TikTok features to jurisdiction-specific regulatory requirements.
     Analyzes target markets and feature characteristics to identify applicable regulations
     in each geographic region. Provides detailed compliance requirements and risk assessment."""
@@ -49,7 +49,7 @@ def geo_compliance_mapping_tool(target_markets: str, feature_characteristics: st
     
     # Format output for agent
     output = []
-    output.append(f"# Geo-Regulatory Compliance Mapping for: {feature_name}")
+    output.append(f"# Geo-Regulatory Compliance Mapping for: {project_name}")
     output.append(f"Target Markets: {', '.join(markets)}")
     output.append(f"Feature Characteristics: {', '.join(characteristics)}")
     output.append(f"Analysis Timestamp: {datetime.utcnow().isoformat()}")
@@ -156,7 +156,7 @@ class GeoRegulatoryAgent:
     
     def __init__(self):
         self.llm = ChatOpenAI(
-            model="gpt-4o",
+            model="gpt-4o-mini-2024-07-18",
             temperature=0.1,
             api_key=os.getenv("OPENAI_API_KEY")
         )
@@ -201,21 +201,21 @@ class GeoRegulatoryAgent:
         
         task = Task(
             description=f"""
-            Conduct comprehensive geo-regulatory compliance analysis for this TikTok feature.
+            Conduct comprehensive geo-regulatory compliance analysis for this project.
             
-            **Feature Details:**
-            - Name: {feature_data.get('feature_name', 'Unknown Feature')}
-            - Description: {feature_data.get('description', 'No description provided')}
-            - Target Markets: {', '.join(feature_data.get('target_markets', []))}
-            - Data Collected: {', '.join(feature_data.get('data_collected', []))}
-            - User Demographics: {', '.join(feature_data.get('user_demographics', []))}
-            - AI Components: {', '.join(feature_data.get('ai_components', []))}
+            **Project Details:**
+            - Name: {feature_data.get('project_name', 'Unknown Project')}
+            - Summary: {feature_data.get('summary', 'No summary provided')}
+            - Description: {feature_data.get('project_description', 'No description provided')}
+            - Type: {feature_data.get('project_type', 'Not specified')}
+            - Priority: {feature_data.get('priority', 'Not specified')}
+            - Due Date: {feature_data.get('due_date', 'Not specified')}
             
             **MANDATORY ANALYSIS STEPS:**
             
             1. **Geo-Compliance Mapping** (REQUIRED):
-               - Use geo_compliance_mapping tool with target_markets: "{', '.join(feature_data.get('target_markets', []))}"
-               - Feature characteristics: Extract relevant characteristics from the feature data
+               - Use geo_compliance_mapping tool with target_markets: "global"
+               - Feature characteristics: Extract relevant characteristics from the project data
                - Include: {self._extract_feature_characteristics(feature_data)}
             
             2. **Audit Trail Generation** (REQUIRED):
@@ -251,49 +251,60 @@ class GeoRegulatoryAgent:
         return {"geo_compliance_analysis": result.raw}
     
     def _extract_feature_characteristics(self, feature_data: Dict[str, Any]) -> str:
-        """Extract feature characteristics for regulatory mapping"""
+        """Extract project characteristics for regulatory mapping from project details"""
         
         characteristics = []
         
-        # Extract from AI components
-        ai_components = feature_data.get('ai_components', [])
-        for component in ai_components:
-            if 'recommendation' in component.lower():
-                characteristics.append('recommendation_engine')
-            if 'personalization' in component.lower():
-                characteristics.append('user_personalization')
-            if 'vision' in component.lower() or 'biometric' in component.lower():
-                characteristics.append('biometric_analysis')
+        # Extract from project details
+        project_name = feature_data.get('project_name', '').lower()
+        summary = feature_data.get('summary', '').lower()
+        description = feature_data.get('project_description', '').lower()
+        project_type = feature_data.get('project_type', '').lower()
+        combined_text = f"{project_name} {summary} {description} {project_type}"
         
-        # Extract from data collected
-        data_types = feature_data.get('data_collected', [])
-        for data_type in data_types:
-            if 'location' in data_type.lower():
-                characteristics.append('location_tracking')
-            if 'biometric' in data_type.lower():
-                characteristics.append('biometric_analysis')
-            if 'personal' in data_type.lower():
-                characteristics.append('user_personalization')
+        # AI/ML detection
+        if any(term in combined_text for term in ['ai', 'ml', 'algorithm', 'machine learning', 'artificial intelligence', 'recommend', 'personalization', 'intelligence']):
+            characteristics.append('recommendation_engine')
+            characteristics.append('user_personalization')
         
-        # Extract from user demographics
-        demographics = feature_data.get('user_demographics', [])
-        for demo in demographics:
-            if any(age in demo for age in ['13', '17', 'teen', 'minor', 'child']):
-                characteristics.append('age_detection')
+        # Biometric/facial recognition detection
+        if any(term in combined_text for term in ['biometric', 'facial', 'face', 'recognition', 'vision', 'image analysis']):
+            characteristics.append('biometric_analysis')
         
-        # Extract from description
-        description = feature_data.get('description', '').lower()
-        if 'social' in description or 'sharing' in description:
+        # Location detection
+        if any(term in combined_text for term in ['location', 'geolocation', 'gps', 'geographic', 'geo']):
+            characteristics.append('location_tracking')
+        
+        # Age/minor detection
+        if any(term in combined_text for term in ['teen', 'child', 'minor', 'age', 'youth', '13', '17', 'under 18']):
+            characteristics.append('age_detection')
+        
+        # Social sharing detection
+        if any(term in combined_text for term in ['social', 'sharing', 'share', 'post', 'comment', 'like', 'follow']):
             characteristics.append('social_sharing')
-        if 'advertis' in description or 'target' in description:
+        
+        # Advertising detection
+        if any(term in combined_text for term in ['advertis', 'target', 'ad', 'marketing', 'promotion']):
             characteristics.append('targeted_advertising')
-        if 'content' in description and 'moderat' in description:
+        
+        # Content moderation detection
+        if any(term in combined_text for term in ['moderat', 'filter', 'content review', 'safety']):
             characteristics.append('content_moderation')
-        if 'analytics' in description or 'track' in description:
+        
+        # Analytics detection
+        if any(term in combined_text for term in ['analytics', 'track', 'metrics', 'data', 'analysis', 'monitoring']):
             characteristics.append('data_analytics')
         
-        # Default characteristics for social media platforms
+        # Video/media detection
+        if any(term in combined_text for term in ['video', 'media', 'content', 'stream', 'upload']):
+            characteristics.append('content_sharing')
+        
+        # Discovery/feed detection
+        if any(term in combined_text for term in ['discovery', 'feed', 'explore', 'trending', 'for you']):
+            characteristics.append('content_curation')
+        
+        # Default characteristics for social media platforms if nothing detected
         if not characteristics:
-            characteristics = ['social_sharing', 'user_personalization']
+            characteristics = ['social_sharing', 'user_personalization', 'content_sharing']
         
         return ', '.join(list(set(characteristics)))

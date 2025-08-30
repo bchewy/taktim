@@ -30,10 +30,7 @@ def test_legal_analyze():
     feature_data = {
         "feature_name": "AI Video Recommendation Engine",
         "description": "Personalized video feed using ML to recommend content based on viewing history",
-        "target_markets": ["US", "EU"],
-        "data_collected": ["user_viewing_history", "like_interactions", "device_info"],
-        "user_demographics": ["general_audience", "teens_13_17"],
-        "ai_components": ["recommendation_algorithm", "content_filtering"]
+        "target_markets": ["US", "EU"]
     }
     
     try:
@@ -58,10 +55,7 @@ def test_comprehensive_compliance():
     feature_data = {
         "feature_name": "AI Video Recommendation Engine",
         "description": "Personalized video feed using ML to recommend content based on viewing history",
-        "target_markets": ["US", "EU"],
-        "data_collected": ["user_viewing_history", "like_interactions", "device_info"],
-        "user_demographics": ["general_audience", "teens_13_17"],
-        "ai_components": ["recommendation_algorithm", "content_filtering"]
+        "target_markets": ["US", "EU"]
     }
     
     try:
@@ -93,10 +87,7 @@ def test_geo_regulatory_mapping():
     feature_data = {
         "feature_name": "AI Video Recommendation Engine",
         "description": "Personalized video feed using ML to recommend content",
-        "target_markets": ["US", "EU"],
-        "data_collected": ["user_viewing_history", "like_interactions"],
-        "user_demographics": ["general_audience", "teens_13_17"],
-        "ai_components": ["recommendation_algorithm"]
+        "target_markets": ["US", "EU"]
     }
     
     try:

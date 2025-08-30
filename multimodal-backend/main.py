@@ -80,14 +80,14 @@ class UploadResponse(BaseModel):
     processing_info: Optional[Dict[str, Any]] = None
 
 
-# TikTok Feature Analysis Models
-class TikTokFeature(BaseModel):
-    feature_name: str = Field(..., description="Name of the TikTok feature")
-    description: str = Field(..., description="Detailed description of the feature")
-    target_markets: List[str] = Field(default=["US"], description="Target geographical markets")
-    data_collected: List[str] = Field(default=[], description="Types of data collected by the feature")
-    user_demographics: List[str] = Field(default=["general_audience"], description="Target user demographics")
-    ai_components: List[str] = Field(default=[], description="AI/ML components used in the feature")
+# Project Analysis Models
+class ProjectAnalysis(BaseModel):
+    summary: str = Field(..., description="Brief summary of the project")
+    project_name: str = Field(..., description="Name of the project")
+    project_description: str = Field(..., description="Detailed description of the project")
+    project_type: Optional[str] = Field(None, description="Type of project (Web Application, Mobile Application, etc.)")
+    priority: Optional[str] = Field(None, description="Project priority (Low, Medium, High, Critical)")
+    due_date: Optional[str] = Field(None, description="Project due date")
 
 
 class RegulationInfo(BaseModel):
@@ -347,7 +347,7 @@ async def delete_task(task_id: str):
 
 # Legal Compliance Analysis Endpoints
 @app.post("/api/legal-analyze", response_model=LegalAnalysisResult)
-async def analyze_feature_legal_compliance(feature: TikTokFeature):
+async def analyze_feature_legal_compliance(feature: ProjectAnalysis):
     """Analyze TikTok feature for legal compliance using CrewAI Legal Agent"""
     try:
         # Convert Pydantic model to dict for the legal agent
@@ -388,7 +388,7 @@ async def analyze_feature_legal_compliance(feature: TikTokFeature):
 
 
 @app.post("/api/legal-risk-assessment")
-async def assess_feature_risks(feature: TikTokFeature, jurisdictions: Optional[List[str]] = None):
+async def assess_feature_risks(feature: ProjectAnalysis, jurisdictions: Optional[List[str]] = None):
     """Perform detailed risk assessment for TikTok feature"""
     try:
         feature_data = feature.model_dump()
@@ -397,9 +397,9 @@ async def assess_feature_risks(feature: TikTokFeature, jurisdictions: Optional[L
         result = multimodal_crew.assess_regulatory_risks(feature_data, jurisdictions)
         
         return {
-            "feature_name": feature.feature_name,
+            "feature_name": feature.project_name,
             "risk_assessment": result.get("risk_assessment", "Assessment completed"),
-            "jurisdictions_analyzed": jurisdictions or feature.target_markets,
+            "jurisdictions_analyzed": jurisdictions or [],
             "timestamp": datetime.utcnow().isoformat()
         }
         
@@ -409,31 +409,29 @@ async def assess_feature_risks(feature: TikTokFeature, jurisdictions: Optional[L
 
 @app.post("/api/legal-quick-check")
 async def quick_legal_check(
-    feature_name: str = Form(...),
-    description: str = Form(...),
-    target_markets: str = Form(default="US"),
-    user_demographics: str = Form(default="general_audience")
+    project_name: str = Form(...),
+    summary: str = Form(...),
+    project_description: str = Form(...),
+    project_type: str = Form(default=""),
+    priority: str = Form(default=""),
+    due_date: str = Form(default="")
 ):
-    """Quick legal compliance check for TikTok features"""
+    """Quick legal compliance check for projects"""
     try:
-        # Convert form data to feature object
-        markets = [market.strip() for market in target_markets.split(",")]
-        demographics = [demo.strip() for demo in user_demographics.split(",")]
-        
         feature_data = {
-            "feature_name": feature_name,
-            "description": description,
-            "target_markets": markets,
-            "data_collected": [],
-            "user_demographics": demographics,
-            "ai_components": []
+            "project_name": project_name,
+            "summary": summary,
+            "project_description": project_description,
+            "project_type": project_type,
+            "priority": priority,
+            "due_date": due_date
         }
         
         # Run quick legal analysis
         result = multimodal_crew.analyze_legal_compliance(feature_data)
         
         return {
-            "feature_name": feature_name,
+            "feature_name": project_name,
             "quick_assessment": "Analysis completed - check detailed_analysis for full results",
             "legal_analysis": result.get("legal_analysis", "Analysis completed"),
             "timestamp": datetime.utcnow().isoformat()
@@ -445,7 +443,7 @@ async def quick_legal_check(
 
 # Comprehensive Geo-Compliance Analysis Endpoints
 @app.post("/api/comprehensive-compliance-analysis")
-async def comprehensive_compliance_analysis(feature: TikTokFeature):
+async def comprehensive_compliance_analysis(feature: ProjectAnalysis):
     """Comprehensive geo-regulatory compliance analysis - THE CORE SOLUTION"""
     try:
         # Convert Pydantic model to dict
@@ -456,7 +454,7 @@ async def comprehensive_compliance_analysis(feature: TikTokFeature):
         
         return {
             "analysis_type": "comprehensive_geo_compliance",
-            "feature_analyzed": feature.feature_name,
+            "feature_analyzed": feature.project_name,
             "result": result,
             "regulatory_inquiry_ready": result.get("audit_trail_ready", False),
             "timestamp": datetime.utcnow().isoformat()
@@ -467,7 +465,7 @@ async def comprehensive_compliance_analysis(feature: TikTokFeature):
 
 
 @app.post("/api/geo-regulatory-mapping") 
-async def geo_regulatory_mapping(feature: TikTokFeature):
+async def geo_regulatory_mapping(feature: ProjectAnalysis):
     """Geo-regulatory mapping analysis for jurisdiction-specific requirements"""
     try:
         feature_data = feature.model_dump()
@@ -480,8 +478,8 @@ async def geo_regulatory_mapping(feature: TikTokFeature):
         
         return {
             "analysis_type": "geo_regulatory_mapping",
-            "feature_analyzed": feature.feature_name,
-            "target_markets": feature.target_markets,
+            "feature_analyzed": feature.project_name,
+            "project_type": feature.project_type,
             "geo_compliance_analysis": result,
             "timestamp": datetime.utcnow().isoformat()
         }
@@ -491,7 +489,7 @@ async def geo_regulatory_mapping(feature: TikTokFeature):
 
 
 @app.post("/api/audit-trail-generation")
-async def generate_audit_trail(feature: TikTokFeature):
+async def generate_audit_trail(feature: ProjectAnalysis):
     """Generate audit trail for regulatory inquiry responses"""
     try:
         feature_data = feature.model_dump()
@@ -501,11 +499,16 @@ async def generate_audit_trail(feature: TikTokFeature):
         
         # Format for audit trail
         audit_data = {
-            "feature_screened": feature.feature_name,
+            "feature_screened": feature.project_name,
             "screening_timestamp": datetime.utcnow().isoformat(),
             "compliance_analysis": comprehensive_result,
             "regulatory_databases_queried": ["Congress.gov", "GovInfo.gov", "Internal Regulatory Database"],
-            "jurisdictions_analyzed": feature.target_markets,
+            "project_details": {
+                "name": feature.project_name,
+                "type": feature.project_type,
+                "priority": feature.priority,
+                "due_date": feature.due_date
+            },
             "audit_trail_status": "REGULATORY_INQUIRY_READY"
         }
         

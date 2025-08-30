@@ -287,15 +287,14 @@ class MultimodalCrew:
         
         task = Task(
             description=f"""
-            Conduct comprehensive legal compliance analysis for this TikTok feature using real-time legal research.
+            Conduct comprehensive legal compliance analysis for this project using real-time legal research.
             
-            **Feature Details:**
-            - Name: {feature_data.get('feature_name', 'Unknown Feature')}
-            - Description: {feature_data.get('description', 'No description provided')}
-            - Target Markets: {', '.join(feature_data.get('target_markets', []))}
-            - Data Collected: {', '.join(feature_data.get('data_collected', []))}
-            - User Demographics: {', '.join(feature_data.get('user_demographics', []))}
-            - AI Components: {', '.join(feature_data.get('ai_components', []))}
+            **Project Details:**
+            - Name: {feature_data.get('project_name', 'Unknown Project')}
+            - Summary: {feature_data.get('summary', 'No summary provided')}
+            - Description: {feature_data.get('project_description', 'No description provided')}
+            - Type: {feature_data.get('project_type', 'Not specified')}
+            - Priority: {feature_data.get('priority', 'Not specified')}
             
             **MANDATORY RESEARCH STEPS (You MUST use your legal research tools):**
             
@@ -355,10 +354,11 @@ class MultimodalCrew:
         
         task = Task(
             description=f"""
-            Perform a detailed regulatory risk assessment for this TikTok feature:
+            Perform a detailed regulatory risk assessment for this project:
             
-            **Feature:** {feature_data.get('feature_name')}
-            **Focus Jurisdictions:** {', '.join(jurisdictions)}
+            **Project:** {feature_data.get('project_name')}
+            **Type:** {feature_data.get('project_type', 'Not specified')}
+            **Priority:** {feature_data.get('priority', 'Not specified')}
             
             **Feature Details:**
             {feature_data}
@@ -413,7 +413,7 @@ class MultimodalCrew:
         
         # Step 3: Combined analysis
         comprehensive_result = {
-            "feature_id": feature_data.get('feature_name', 'Unknown'),
+            "project_id": feature_data.get('project_name', 'Unknown'),
             "analysis_timestamp": datetime.utcnow().isoformat(),
             "legal_research": legal_analysis,
             "geo_regulatory_mapping": geo_analysis,
@@ -454,7 +454,7 @@ class ChatAgent:
     
     def __init__(self):
         self.llm = ChatOpenAI(
-            model="gpt-4o",
+            model="gpt-4o-mini-2024-07-18",
             temperature=0.3,
             api_key=os.getenv("OPENAI_API_KEY")
         )

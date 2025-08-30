@@ -8,11 +8,8 @@ services:
     environment:
       # API Keys - set these in your .env file or environment
       - OPENAI_API_KEY=${OPENAI_API_KEY}
-      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
-      - FIRECRAWL_API_KEY=${FIRECRAWL_API_KEY}
       - EXA_API_KEY=${EXA_API_KEY}
       - PERPLEXITY_API_KEY=${PERPLEXITY_API_KEY}
-      - PINECONE_API_KEY=${PINECONE_API_KEY}
       
       # System Configuration
       - RAG_TOPK=6

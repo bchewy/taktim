@@ -17,10 +17,7 @@ TEST_SCENARIOS = [
         "feature": {
             "feature_name": "AI Teen Discovery Feed",
             "description": "Personalized content recommendation system for teenage users with AI-driven engagement optimization",
-            "target_markets": ["US", "EU", "Canada"],
-            "data_collected": ["viewing_history", "interaction_patterns", "biometric_engagement", "location_data"],
-            "user_demographics": ["13-17", "teen_users"],
-            "ai_components": ["recommendation_engine", "engagement_optimization", "behavioral_analysis"]
+            "target_markets": ["US", "EU", "Canada"]
         },
         "expected_risk": "HIGH",
         "expected_jurisdictions": ["US_FEDERAL", "US_CALIFORNIA", "EUROPEAN_UNION", "CANADA"],
@@ -31,10 +28,7 @@ TEST_SCENARIOS = [
         "feature": {
             "feature_name": "Social Circle Suggestions",
             "description": "Friend recommendation system using social graph analysis for adult users",
-            "target_markets": ["US", "Australia"],
-            "data_collected": ["social_connections", "user_preferences", "activity_data"],
-            "user_demographics": ["18+", "adult_users"],
-            "ai_components": ["social_graph_analysis", "recommendation_engine"]
+            "target_markets": ["US", "Australia"]
         },
         "expected_risk": "MEDIUM",
         "expected_jurisdictions": ["US_FEDERAL", "AUSTRALIA"],
@@ -45,10 +39,7 @@ TEST_SCENARIOS = [
         "feature": {
             "feature_name": "Basic Content Categories",
             "description": "Simple content categorization without personalization or data collection",
-            "target_markets": ["US"],
-            "data_collected": [],
-            "user_demographics": ["general_audience"],
-            "ai_components": ["content_classification"]
+            "target_markets": ["US"]
         },
         "expected_risk": "LOW",
         "expected_jurisdictions": [],
@@ -59,10 +50,7 @@ TEST_SCENARIOS = [
         "feature": {
             "feature_name": "Dance Move Recognition for Kids",
             "description": "Biometric dance analysis for users under 13 with facial recognition and movement tracking",
-            "target_markets": ["US", "EU", "Canada"],
-            "data_collected": ["facial_biometrics", "movement_patterns", "video_uploads", "location_data"],
-            "user_demographics": ["under_13", "children"],
-            "ai_components": ["facial_recognition", "biometric_analysis", "movement_tracking"]
+            "target_markets": ["US", "EU", "Canada"]
         },
         "expected_risk": "CRITICAL",
         "expected_jurisdictions": ["US_FEDERAL", "US_CALIFORNIA", "EUROPEAN_UNION", "CANADA"],
