@@ -17,14 +17,13 @@ const SingleAnalysis = () => {
     const [result, setResult] = useState(null);
     const [currentStage, setCurrentStage] = useState('initializing');
     const [showResultsReady, setShowResultsReady] = useState(false);
-    const [isFormCollapsed, setIsFormCollapsed] = useState(false);
     const [showFeatureDetails, setShowFeatureDetails] = useState(true);
 
     // Accordion state management
     const [accordionState, setAccordionState] = useState({
         legalResearch: true, // Start with legal research expanded
         geoRegulatory: false,
-        documentationTrail: true, // Start with documentation trail expanded
+        documentationTrail: false,
         complianceStatus: true, // Start with compliance status expanded
     });
 
@@ -59,6 +58,11 @@ const SingleAnalysis = () => {
             if (stageIndex < stages.length - 1) {
                 stageIndex++;
                 setCurrentStage(stages[stageIndex]);
+            } else {
+                // On final stage, show "Results Ready" after a delay
+                setTimeout(() => {
+                    setShowResultsReady(true);
+                }, 1500);
             }
         }, 2000);
 
@@ -90,14 +94,43 @@ const SingleAnalysis = () => {
             console.error("Analysis failed:", error);
             setResult({ error: "Analysis failed. Please try again." });
         } finally {
-            // Show results ready immediately when we have results, then transition
-            setShowResultsReady(true);
+            // Delay to show results ready state, keep feature details collapsed
             setTimeout(() => {
                 setIsAnalyzing(false);
                 setCurrentStage('initializing');
                 setShowResultsReady(false);
                 // Keep feature details collapsed after analysis
-            }, 2000); // Longer delay to show "Ready to view results"
+            }, 1000);
+        }
+    };
+
+    const [userModifications, setUserModifications] = useState({});
+    const [isSubmittingModifications, setIsSubmittingModifications] = useState(false);
+
+    const handleModificationSubmit = async (e) => {
+        e.preventDefault();
+        setIsAnalyzing(true);
+        setCurrentStage('initializing');
+        setShowResultsReady(false);
+        setShowFeatureDetails(false); // Collapse feature details during analysis
+        try {
+            const response = await fetch(
+                "http://localhost:8001/api/comprehensive-compliance-analysis", // Same endpoint as single analysis
+                {
+                    method: "POST",
+                    headers: {
+                        "Content-Type": "application/json",
+                    },
+                    body: JSON.stringify(userModifications),
+                }
+            );
+
+            const updatedResult = await response.json();
+            setResult(updatedResult);
+        } catch (error) {
+            console.error("Failed to submit modifications:", error);
+        } finally {
+            setIsSubmittingModifications(false);
         }
     };
 
@@ -1390,6 +1423,151 @@ const SingleAnalysis = () => {
                                     Copy to Clipboard
                                 </button>
                             </div>
+
+                            {/* Human-in-the-Loop Modification Section */}
+                            {result && !result.error && (
+                                <div className="p-6 border border-gray-200 rounded-lg bg-gray-50">
+                                    <h3 className="text-lg font-semibold text-gray-900 mb-4">
+                                        Modify Results
+                                    </h3>
+                                    <form onSubmit={handleModificationSubmit} className="space-y-4">
+                                        <div>
+                                            <label className="block mb-2 text-sm font-medium text-gray-700">
+                                                Summary *
+                                            </label>
+                                            <textarea
+                                                required
+                                                value={userModifications.summary || result.summary}
+                                                onChange={(e) =>
+                                                    setUserModifications((prev) => ({
+                                                        ...prev,
+                                                        summary: e.target.value,
+                                                    }))
+                                                }
+                                                rows={3}
+                                                className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                                                placeholder="Brief summary of your feature"
+                                            />
+                                        </div>
+
+                                        <div>
+                                            <label className="block mb-2 text-sm font-medium text-gray-700">
+                                                Feature Name *
+                                            </label>
+                                            <input
+                                                type="text"
+                                                required
+                                                value={userModifications.project_name || result.project_name}
+                                                onChange={(e) =>
+                                                    setUserModifications((prev) => ({
+                                                        ...prev,
+                                                        project_name: e.target.value,
+                                                    }))
+                                                }
+                                                className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                                                placeholder="e.g., Video Upload Feature"
+                                            />
+                                        </div>
+
+                                        <div>
+                                            <label className="block mb-2 text-sm font-medium text-gray-700">
+                                                Feature Description *
+                                            </label>
+                                            <textarea
+                                                required
+                                                value={userModifications.project_description || result.project_description}
+                                                onChange={(e) =>
+                                                    setUserModifications((prev) => ({
+                                                        ...prev,
+                                                        project_description: e.target.value,
+                                                    }))
+                                                }
+                                                rows={4}
+                                                className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                                                placeholder="Detailed description of the feature and its functionality"
+                                            />
+                                        </div>
+
+                                        <div>
+                                            <label className="block mb-2 text-sm font-medium text-gray-700">
+                                                Feature Type
+                                            </label>
+                                            <select
+                                                value={userModifications.project_type || result.project_type}
+                                                onChange={(e) =>
+                                                    setUserModifications((prev) => ({
+                                                        ...prev,
+                                                        project_type: e.target.value,
+                                                    }))
+                                                }
+                                                className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                                            >
+                                                <option value="">Select feature type</option>
+                                                <option value="Web Application">Web Application</option>
+                                                <option value="Mobile Application">Mobile Application</option>
+                                                <option value="API Development">API Development</option>
+                                                <option value="Data Processing">Data Processing</option>
+                                                <option value="AI/ML Solution">AI/ML Solution</option>
+                                                <option value="Infrastructure">Infrastructure</option>
+                                                <option value="Other">Other</option>
+                                            </select>
+                                        </div>
+
+                                        <div>
+                                            <label className="block mb-2 text-sm font-medium text-gray-700">
+                                                Priority
+                                            </label>
+                                            <select
+                                                value={userModifications.priority || result.priority}
+                                                onChange={(e) =>
+                                                    setUserModifications((prev) => ({
+                                                        ...prev,
+                                                        priority: e.target.value,
+                                                    }))
+                                                }
+                                                className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                                            >
+                                                <option value="">Select priority</option>
+                                                <option value="Low">Low</option>
+                                                <option value="Medium">Medium</option>
+                                                <option value="High">High</option>
+                                                <option value="Critical">Critical</option>
+                                            </select>
+                                        </div>
+
+                                        <div>
+                                            <label className="block mb-2 text-sm font-medium text-gray-700">
+                                                Due Date
+                                            </label>
+                                            <input
+                                                type="date"
+                                                value={userModifications.due_date || result.due_date}
+                                                onChange={(e) =>
+                                                    setUserModifications((prev) => ({
+                                                        ...prev,
+                                                        due_date: e.target.value,
+                                                    }))
+                                                }
+                                                className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                                            />
+                                        </div>
+
+                                        <div className="space-y-3">
+                                            <button
+                                                type="submit"
+                                                disabled={isSubmittingModifications}
+                                                className={`w-full py-3 px-4 rounded-md font-medium ${
+                                                    isSubmittingModifications
+                                                        ? "bg-gray-400 cursor-not-allowed"
+                                                        : "bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                                                } text-white transition-colors`}
+                                            >
+                                                {isSubmittingModifications ? "Submitting..." : "Submit Modifications"}
+                                            </button>
+                                        </div>
+                                    </form>
+                                </div>
+                            )}
                         </div>
                     )}
                     </div>
