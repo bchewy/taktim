@@ -1,6 +1,8 @@
 # TikTok TeckJam 2025
 
-## Team Don Don Donki
+## Team: Don Don Donki
+
+### Our Product: GeoGovLite
 
 ## Repository Information
 
@@ -17,6 +19,12 @@
 ### Assets used in the project
 
 -   **TikTok Dataset:** Sample dataset given below.
+
+---
+
+## Problem Statement 3:
+
+### From Guesswork to Governance: Automating Geo-Regulation with LLM
 
 ### Assets used in the project
 
@@ -52,7 +60,7 @@ Build a prototype system that **utilizes LLM capabilities to flag features that 
 -   ❌ "Geofences feature rollout in US for market testing" (Business-driven ≠ legal requirement)
 -   ❓ "A video filter feature is available globally except KR" (didn't specify the intention, need human evaluation)
 
-### The expected output of the system:
+### The Expected Output of the System:
 
 -   (required) Flag whether this feature needs geo-specific compliance logic
 -   (required) Clear Reasoning
