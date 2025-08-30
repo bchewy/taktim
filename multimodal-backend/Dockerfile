@@ -30,7 +30,7 @@ COPY main.py .
 COPY src/ ./src/
 
 # Copy configuration files
-COPY .env* ./
+COPY .env ./
 
 # Set ownership
 RUN chown -R app:app /app
