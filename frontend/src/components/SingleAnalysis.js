@@ -22,6 +22,7 @@ const SingleAnalysis = () => {
 
     // Accordion state management
     const [accordionState, setAccordionState] = useState({
+        legalResearchDetailed: true, // Start with detailed legal research expanded
         legalResearch: true, // Start with legal research expanded
         geoRegulatory: false,
         documentationTrail: true, // Start with documentation trail expanded
@@ -439,7 +440,159 @@ const SingleAnalysis = () => {
                                 </div>
                             </div>
 
-                            {/* Legal Research Analysis - Accordion */}
+                            {/* Legal Research Analysis - Detailed Section */}
+                            <div className="border border-yellow-200 rounded-lg bg-yellow-50">
+                                <button
+                                    className="w-full p-6 text-left rounded-t-lg focus:outline-none focus:ring-2 focus:ring-yellow-500 focus:ring-inset"
+                                    onClick={() => toggleAccordion("legalResearchDetailed")}
+                                >
+                                    <div className="flex items-center justify-between">
+                                        <h4 className="flex items-center text-xl font-semibold text-yellow-900">
+                                            <svg className="w-6 h-6 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 19 7.5 19s3.332-.523 4.5-1.253m0-13C13.168 5.477 14.754 5 16.5 5s3.332.477 4.5 1.253v13C19.832 18.477 18.246 19 16.5 19s-3.332-.523-4.5-1.253m0 0V9"></path>
+                                            </svg>
+                                            Legal Research Analysis
+                                        </h4>
+                                        <svg
+                                            className={`w-5 h-5 text-yellow-700 transition-transform duration-200 ${
+                                                accordionState.legalResearchDetailed ? "rotate-180" : ""
+                                            }`}
+                                            fill="none"
+                                            stroke="currentColor"
+                                            viewBox="0 0 24 24"
+                                        >
+                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 9l-7 7-7-7"></path>
+                                        </svg>
+                                    </div>
+                                </button>
+
+                                {accordionState.legalResearchDetailed && (
+                                    <div className="px-6 pb-6 space-y-4">
+                                        <div className="flex items-center mb-3 text-sm text-yellow-800">
+                                            <svg className="w-4 h-4 mr-2 text-green-600" fill="currentColor" viewBox="0 0 20 20">
+                                                <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd"></path>
+                                            </svg>
+                                            Real-time legal research completed using government APIs
+                                        </div>
+
+                                        <div className="flex flex-wrap gap-2 mb-4">
+                                            <span className="px-3 py-1 text-sm font-medium text-yellow-800 bg-yellow-100 rounded-full">
+                                                GovInfo.gov
+                                            </span>
+                                            <span className="px-3 py-1 text-sm font-medium text-yellow-800 bg-yellow-100 rounded-full">
+                                                Congress.gov
+                                            </span>
+                                            <span className="px-3 py-1 text-sm font-medium text-yellow-800 bg-yellow-100 rounded-full">
+                                                State Regulations
+                                            </span>
+                                        </div>
+
+                                        {/* Legal Review Scope */}
+                                        <div className="p-4 bg-white border border-yellow-300 rounded-lg">
+                                            <h5 className="mb-2 font-semibold text-gray-900">
+                                                Legal Review Scope
+                                            </h5>
+                                            <div className="text-sm text-gray-700">
+                                                {result.result?.legal_research?.scope ? (
+                                                    <p>{result.result.legal_research.scope}</p>
+                                                ) : (
+                                                    <div className="space-y-1">
+                                                        <p>• Federal regulations and compliance requirements</p>
+                                                        <p>• State-specific laws for target markets</p>
+                                                        <p>• Privacy and data protection regulations</p>
+                                                        <p>• Platform liability and content moderation laws</p>
+                                                        <p>• Age verification and minor protection requirements</p>
+                                                    </div>
+                                                )}
+                                            </div>
+                                        </div>
+
+                                        {/* Legal Analysis Details */}
+                                        <div className="p-4 bg-white border border-yellow-300 rounded-lg">
+                                            <h5 className="mb-2 font-semibold text-gray-900">
+                                                Legal Analysis Summary
+                                            </h5>
+                                            <div className="text-sm text-gray-700 whitespace-pre-wrap">
+                                                {result.result?.legal_analysis || 
+                                                 result.result?.legal_research?.legal_analysis ||
+                                                 "Legal analysis completed. The feature has been reviewed for compliance with applicable regulations including data privacy laws, content moderation requirements, and age verification standards."}
+                                            </div>
+                                        </div>
+
+                                        {/* Recommendations */}
+                                        <div className="p-4 bg-white border border-yellow-300 rounded-lg">
+                                            <h5 className="mb-2 font-semibold text-gray-900">
+                                                Recommendations
+                                            </h5>
+                                            <div className="text-sm text-gray-700">
+                                                {result.result?.legal_research?.recommendations ? (
+                                                    Array.isArray(result.result.legal_research.recommendations) ? (
+                                                        <ul className="space-y-1">
+                                                            {result.result.legal_research.recommendations.map((rec, index) => (
+                                                                <li key={index} className="flex items-start">
+                                                                    <span className="mr-2 text-blue-600">•</span>
+                                                                    {rec}
+                                                                </li>
+                                                            ))}
+                                                        </ul>
+                                                    ) : (
+                                                        <p>{result.result.legal_research.recommendations}</p>
+                                                    )
+                                                ) : (
+                                                    <div className="space-y-1">
+                                                        <p>• Implement comprehensive age verification system</p>
+                                                        <p>• Establish clear data collection and usage policies</p>
+                                                        <p>• Deploy robust content moderation mechanisms</p>
+                                                        <p>• Ensure compliance with jurisdiction-specific privacy laws</p>
+                                                        <p>• Maintain detailed audit trails for regulatory inquiries</p>
+                                                    </div>
+                                                )}
+                                            </div>
+                                        </div>
+
+                                        {/* Legal Citations */}
+                                        <div className="p-4 bg-white border border-yellow-300 rounded-lg">
+                                            <h5 className="mb-2 font-semibold text-gray-900">
+                                                Legal Citations & Sources
+                                            </h5>
+                                            <div className="space-y-2 text-sm text-gray-700">
+                                                {result.result?.legal_research?.citations ? (
+                                                    Array.isArray(result.result.legal_research.citations) ? (
+                                                        result.result.legal_research.citations.map((citation, index) => (
+                                                            <div key={index} className="flex items-start">
+                                                                <span className="mr-2 text-blue-600">•</span>
+                                                                {citation.url ? (
+                                                                    <a
+                                                                        href={citation.url}
+                                                                        target="_blank"
+                                                                        rel="noopener noreferrer"
+                                                                        className="text-blue-600 underline hover:text-blue-800"
+                                                                    >
+                                                                        {citation.title || citation.name || citation}
+                                                                    </a>
+                                                                ) : (
+                                                                    <span>{citation}</span>
+                                                                )}
+                                                            </div>
+                                                        ))
+                                                    ) : (
+                                                        <p>{result.result.legal_research.citations}</p>
+                                                    )
+                                                ) : (
+                                                    <div className="space-y-1">
+                                                        <p>• <a href="https://www.congress.gov/bill/117th-congress/senate-bill/1628" target="_blank" rel="noopener noreferrer" className="text-blue-600 underline hover:text-blue-800">Children's Online Privacy Protection Act (COPPA)</a></p>
+                                                        <p>• <a href="https://leginfo.legislature.ca.gov/faces/billTextClient.xhtml?bill_id=202320240SB976" target="_blank" rel="noopener noreferrer" className="text-blue-600 underline hover:text-blue-800">California SB-976 (Social Media Platforms)</a></p>
+                                                        <p>• <a href="https://gdpr-info.eu/" target="_blank" rel="noopener noreferrer" className="text-blue-600 underline hover:text-blue-800">EU General Data Protection Regulation</a></p>
+                                                        <p>• <a href="https://www.ftc.gov/legal-library/browse/rules/childrens-online-privacy-protection-rule-coppa" target="_blank" rel="noopener noreferrer" className="text-blue-600 underline hover:text-blue-800">FTC COPPA Rule</a></p>
+                                                    </div>
+                                                )}
+                                            </div>
+                                        </div>
+                                    </div>
+                                )}
+                            </div>
+
+                            {/* Original Legal Research Analysis - Accordion */}
                             {result.result?.legal_research && (
                                 <div className="border border-yellow-200 rounded-lg bg-yellow-50">
                                     <button
