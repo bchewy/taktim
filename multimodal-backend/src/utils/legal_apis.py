@@ -19,21 +19,31 @@ load_dotenv(project_root / ".env")
 class GovInfoAPI:
     """GovInfo API client for accessing federal regulations"""
     
-    def __init__(self):
+    def __init__(self, api_key: Optional[str] = None):
         self.base_url = "https://api.govinfo.gov"
+        self.api_key = api_key or os.getenv("GOVINFO_API_KEY")
         self.client = httpx.AsyncClient(timeout=30.0)
+        
+        if not self.api_key:
+            print("Warning: GovInfo API key not found. API requests may be limited or fail.")
     
     async def search_regulations(self, query: str, collection: str = "cfr") -> Dict[str, Any]:
         """Search Code of Federal Regulations (CFR)"""
         try:
-            params = {
+            headers = {
+                "Content-Type": "application/json"
+            }
+            if self.api_key:
+                headers["X-API-Key"] = self.api_key
+            
+            request_body = {
                 "query": query,
                 "pageSize": 10,
                 "offsetMark": "*",
-                "collection": collection
+                "collections": [collection]
             }
             
-            response = await self.client.get(f"{self.base_url}/search", params=params)
+            response = await self.client.post(f"{self.base_url}/search", headers=headers, json=request_body)
             response.raise_for_status()
             
             return response.json()
@@ -45,7 +55,11 @@ class GovInfoAPI:
     async def get_regulation_details(self, package_id: str) -> Dict[str, Any]:
         """Get detailed information about a specific regulation"""
         try:
-            response = await self.client.get(f"{self.base_url}/packages/{package_id}/summary")
+            headers = {}
+            if self.api_key:
+                headers["X-API-Key"] = self.api_key
+                
+            response = await self.client.get(f"{self.base_url}/packages/{package_id}/summary", headers=headers)
             response.raise_for_status()
             
             return response.json()
