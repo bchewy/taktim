@@ -1,4 +1,7 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
+import AgentVisualization from './AgentVisualization';
+import ResultsReady from './ResultsReady';
+import { ChevronDown, ChevronUp } from 'lucide-react';
 
 const SingleAnalysis = () => {
     const [formData, setFormData] = useState({
@@ -12,6 +15,10 @@ const SingleAnalysis = () => {
 
     const [isAnalyzing, setIsAnalyzing] = useState(false);
     const [result, setResult] = useState(null);
+    const [currentStage, setCurrentStage] = useState('initializing');
+    const [showResultsReady, setShowResultsReady] = useState(false);
+    const [isFormCollapsed, setIsFormCollapsed] = useState(false);
+    const [showFeatureDetails, setShowFeatureDetails] = useState(true);
 
     // Accordion state management
     const [accordionState, setAccordionState] = useState({
@@ -40,9 +47,35 @@ const SingleAnalysis = () => {
         });
     };
 
+    // Stage progression effect
+    useEffect(() => {
+        if (!isAnalyzing) return;
+
+        // Real backend flow: comprehensive_compliance_analysis -> analyze_legal_compliance -> geo_compliance_mapping -> audit_trail
+        const stages = ['initializing', 'legal_analysis', 'geo_mapping', 'audit_generation', 'finalizing'];
+        let stageIndex = 0;
+        
+        const stageInterval = setInterval(() => {
+            if (stageIndex < stages.length - 1) {
+                stageIndex++;
+                setCurrentStage(stages[stageIndex]);
+            } else {
+                // On final stage, show "Results Ready" after a delay
+                setTimeout(() => {
+                    setShowResultsReady(true);
+                }, 1500);
+            }
+        }, 2000);
+
+        return () => clearInterval(stageInterval);
+    }, [isAnalyzing]);
+
     const handleSubmit = async (e) => {
         e.preventDefault();
         setIsAnalyzing(true);
+        setCurrentStage('initializing');
+        setShowResultsReady(false);
+        setShowFeatureDetails(false); // Collapse feature details during analysis
 
         try {
             const response = await fetch(
@@ -62,7 +95,13 @@ const SingleAnalysis = () => {
             console.error("Analysis failed:", error);
             setResult({ error: "Analysis failed. Please try again." });
         } finally {
-            setIsAnalyzing(false);
+            // Delay to show results ready state, keep feature details collapsed
+            setTimeout(() => {
+                setIsAnalyzing(false);
+                setCurrentStage('initializing');
+                setShowResultsReady(false);
+                // Keep feature details collapsed after analysis
+            }, 1000);
         }
     };
 
@@ -78,12 +117,33 @@ const SingleAnalysis = () => {
                 </p>
             </div>
 
-            <div className="grid grid-cols-1 gap-8 lg:grid-cols-2">
-                {/* Form */}
-                <div className="p-6 bg-white rounded-lg shadow">
-                    <h2 className="mb-6 text-xl font-semibold text-gray-900">
-                        Feature Details
-                    </h2>
+
+            <div className="max-w-4xl mx-auto space-y-6">
+                {/* Feature Details - Collapsible */}
+                <div className="bg-white rounded-lg shadow">
+                    <div 
+                        className="p-6 border-b border-gray-200 cursor-pointer hover:bg-gray-50 transition-colors"
+                        onClick={() => setShowFeatureDetails(!showFeatureDetails)}
+                    >
+                        <div className="flex items-center justify-between">
+                            <h2 className="text-xl font-semibold text-gray-900">
+                                Feature Details
+                            </h2>
+                            {showFeatureDetails ? (
+                                <ChevronUp className="w-5 h-5 text-gray-500" />
+                            ) : (
+                                <ChevronDown className="w-5 h-5 text-gray-500" />
+                            )}
+                        </div>
+                        {!showFeatureDetails && (
+                            <p className="text-sm text-gray-600 mt-2">
+                                Click to expand feature details form
+                            </p>
+                        )}
+                    </div>
+                    
+                    {showFeatureDetails && (
+                        <div className="p-6 transition-all duration-300">
 
                     <form onSubmit={handleSubmit} className="space-y-6">
                         <div>
@@ -243,15 +303,20 @@ const SingleAnalysis = () => {
                             </button>
                         </div>
                     </form>
+                        </div>
+                    )}
                 </div>
 
-                {/* Results */}
-                <div className="p-6 bg-white rounded-lg shadow">
-                    <h2 className="mb-6 text-xl font-semibold text-gray-900">
-                        Analysis Results
-                    </h2>
+                {/* Analysis Results */}
+                <div className="bg-white rounded-lg shadow">
+                    <div className="p-6 border-b border-gray-200">
+                        <h2 className="text-xl font-semibold text-gray-900">
+                            Analysis Results
+                        </h2>
+                    </div>
+                    <div className="p-6">
 
-                    {!result && (
+                    {!result && !isAnalyzing && (
                         <div className="py-8 text-center text-gray-500">
                             <p>
                                 Submit a feature for analysis to see results
@@ -260,13 +325,16 @@ const SingleAnalysis = () => {
                         </div>
                     )}
 
-                    {isAnalyzing && (
-                        <div className="py-8 text-center">
-                            <div className="w-8 h-8 mx-auto border-b-2 border-blue-600 rounded-full animate-spin"></div>
-                            <p className="mt-4 text-gray-600">
-                                Analyzing feature compliance...
-                            </p>
-                        </div>
+                    {isAnalyzing && !showResultsReady && (
+                        <AgentVisualization 
+                            isActive={isAnalyzing} 
+                            stage={currentStage}
+                            analysisType="single"
+                        />
+                    )}
+
+                    {showResultsReady && (
+                        <ResultsReady />
                     )}
 
                     {result && result.error && (
@@ -1328,6 +1396,7 @@ const SingleAnalysis = () => {
                             </div>
                         </div>
                     )}
+                    </div>
                 </div>
             </div>
         </div>

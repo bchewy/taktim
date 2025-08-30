@@ -15,12 +15,13 @@ import io
 
 from fastapi import FastAPI, File, UploadFile, HTTPException, BackgroundTasks, Form
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel, Field
 from dotenv import load_dotenv
 
 from src.agents.multimodal_crew import MultimodalCrew, ChatAgent
 from src.utils.file_handler import FileHandler
+from src.utils.agent_progress_tracker import progress_tracker, start_analysis_tracking, complete_analysis_tracking
 
 # Load environment variables from project root
 from pathlib import Path
@@ -446,23 +447,34 @@ async def quick_legal_check(
 # Comprehensive Geo-Compliance Analysis Endpoints
 @app.post("/api/comprehensive-compliance-analysis")
 async def comprehensive_compliance_analysis(feature: ProjectAnalysis):
-    """Comprehensive geo-regulatory compliance analysis - THE CORE SOLUTION"""
+    """Comprehensive geo-regulatory compliance analysis with real-time tracking"""
+    session_id = None
     try:
+        # Start progress tracking
+        session_id = start_analysis_tracking()
+        
         # Convert Pydantic model to dict
         feature_data = feature.model_dump()
+        feature_data['_session_id'] = session_id  # Pass session ID to crew
         
-        # Run comprehensive analysis (Legal + Geo-Regulatory)
+        # Run comprehensive analysis (Legal + Geo-Regulatory) with tracking
         result = multimodal_crew.analyze_comprehensive_compliance(feature_data)
+        
+        # Complete tracking
+        complete_analysis_tracking(session_id)
         
         return {
             "analysis_type": "comprehensive_geo_compliance",
             "feature_analyzed": feature.project_name,
             "result": result,
             "regulatory_inquiry_ready": result.get("audit_trail_ready", False),
-            "timestamp": datetime.utcnow().isoformat()
+            "timestamp": datetime.utcnow().isoformat(),
+            "session_id": session_id  # Return session ID for frontend tracking
         }
         
     except Exception as e:
+        if session_id:
+            complete_analysis_tracking(session_id)
         raise HTTPException(status_code=500, detail=f"Comprehensive compliance analysis failed: {str(e)}")
 
 
@@ -488,6 +500,25 @@ async def geo_regulatory_mapping(feature: ProjectAnalysis):
         
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Geo-regulatory mapping failed: {str(e)}")
+
+
+@app.get("/api/progress-stream/{session_id}")
+async def stream_analysis_progress(session_id: str):
+    """Stream real-time analysis progress via Server-Sent Events"""
+    
+    async def generate_stream():
+        async for data in progress_tracker.stream_progress(session_id):
+            yield data
+    
+    return StreamingResponse(
+        generate_stream(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "Access-Control-Allow-Origin": "*",
+        }
+    )
 
 
 @app.post("/api/audit-trail-generation")

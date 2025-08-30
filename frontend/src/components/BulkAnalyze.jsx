@@ -1,12 +1,14 @@
 import React, { useState } from 'react'
 import { Upload, Plus, Trash2, Play, Download, FileText, AlertCircle, CheckCircle, Loader2 } from 'lucide-react'
 import { bulkAnalyze } from '../api/client'
+import AgentVisualization from './AgentVisualization'
 
 const BulkAnalyze = () => {
   const [features, setFeatures] = useState([])
   const [loading, setLoading] = useState(false)
   const [results, setResults] = useState(null)
   const [progress, setProgress] = useState({ current: 0, total: 0 })
+  const [currentStage, setCurrentStage] = useState('initializing')
 
   const addFeature = () => {
     const newFeature = {
@@ -100,6 +102,17 @@ const BulkAnalyze = () => {
 
     setLoading(true)
     setProgress({ current: 0, total: features.length })
+    
+    // Simulate stage progression for bulk analysis
+    const stages = ['initializing', 'ai_analysis', 'geo_regulatory', 'generating_response']
+    let stageIndex = 0
+    
+    const stageInterval = setInterval(() => {
+      if (stageIndex < stages.length - 1) {
+        stageIndex++
+        setCurrentStage(stages[stageIndex])
+      }
+    }, 2000)
 
     try {
       // Convert features to API format
@@ -114,13 +127,16 @@ const BulkAnalyze = () => {
 
       const result = await bulkAnalyze(apiFeatures)
       setResults(result)
+      clearInterval(stageInterval)
       
     } catch (error) {
       console.error('Bulk analysis failed:', error)
       alert('Bulk analysis failed: ' + error.message)
+      clearInterval(stageInterval)
     } finally {
       setLoading(false)
       setProgress({ current: 0, total: 0 })
+      setCurrentStage('initializing')
     }
   }
 
@@ -141,6 +157,13 @@ const BulkAnalyze = () => {
 
   return (
     <div className="space-y-6">
+      {/* Agent Visualization */}
+      <AgentVisualization 
+        isActive={loading} 
+        stage={currentStage}
+        analysisType="bulk"
+      />
+      
       {/* Header */}
       <div className="flex justify-between items-start">
         <div>
