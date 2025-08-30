@@ -5,6 +5,7 @@ import ResultDisplay from './components/ResultDisplay'
 import SystemStatus from './components/SystemStatus'
 import AuditTrail from './components/AuditTrail'
 import BulkAnalyze from './components/BulkAnalyze'
+import AgentVisualization from './components/AgentVisualization'
 import { analyzeFeature, getSystemHealth, refreshCorpus, downloadEvidence, getRagStatus } from './api/client'
 
 function App() {
@@ -103,23 +104,32 @@ function App() {
     switch (currentPage) {
       case 'analysis':
         return (
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
-            {/* Analysis Form */}
-            <div className="bg-white rounded-lg shadow p-6">
-              <div className="flex items-center mb-6">
-                <Brain className="h-6 w-6 text-blue-600 mr-2" />
-                <h2 className="text-xl font-semibold text-gray-900">Feature Analysis</h2>
+          <div className="space-y-8">
+            {/* Agent Visualization */}
+            <AgentVisualization 
+              isActive={loading} 
+              stage={loadingStage}
+              analysisType="single"
+            />
+            
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+              {/* Analysis Form */}
+              <div className="bg-white rounded-lg shadow p-6">
+                <div className="flex items-center mb-6">
+                  <Brain className="h-6 w-6 text-blue-600 mr-2" />
+                  <h2 className="text-xl font-semibold text-gray-900">Feature Analysis</h2>
+                </div>
+                <AnalysisForm onAnalyze={handleAnalyze} loading={loading} />
               </div>
-              <AnalysisForm onAnalyze={handleAnalyze} loading={loading} />
-            </div>
 
-            {/* Results */}
-            <div className="bg-white rounded-lg shadow p-6">
-              <div className="flex items-center mb-6">
-                <FileText className="h-6 w-6 text-green-600 mr-2" />
-                <h2 className="text-xl font-semibold text-gray-900">Analysis Results</h2>
+              {/* Results */}
+              <div className="bg-white rounded-lg shadow p-6">
+                <div className="flex items-center mb-6">
+                  <FileText className="h-6 w-6 text-green-600 mr-2" />
+                  <h2 className="text-xl font-semibold text-gray-900">Analysis Results</h2>
+                </div>
+                <ResultDisplay result={result} loading={loading} loadingStage={loadingStage} />
               </div>
-              <ResultDisplay result={result} loading={loading} loadingStage={loadingStage} />
             </div>
           </div>
         )

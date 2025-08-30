@@ -10,15 +10,18 @@ from datetime import datetime
 from pathlib import Path
 from typing import Dict, List, Optional, Any
 import json
+import csv
+import io
 
 from fastapi import FastAPI, File, UploadFile, HTTPException, BackgroundTasks, Form
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel, Field
 from dotenv import load_dotenv
 
 from src.agents.multimodal_crew import MultimodalCrew, ChatAgent
 from src.utils.file_handler import FileHandler
+from src.utils.agent_progress_tracker import progress_tracker, start_analysis_tracking, complete_analysis_tracking
 
 # Load environment variables from project root
 from pathlib import Path
@@ -444,23 +447,34 @@ async def quick_legal_check(
 # Comprehensive Geo-Compliance Analysis Endpoints
 @app.post("/api/comprehensive-compliance-analysis")
 async def comprehensive_compliance_analysis(feature: ProjectAnalysis):
-    """Comprehensive geo-regulatory compliance analysis - THE CORE SOLUTION"""
+    """Comprehensive geo-regulatory compliance analysis with real-time tracking"""
+    session_id = None
     try:
+        # Start progress tracking
+        session_id = start_analysis_tracking()
+        
         # Convert Pydantic model to dict
         feature_data = feature.model_dump()
+        feature_data['_session_id'] = session_id  # Pass session ID to crew
         
-        # Run comprehensive analysis (Legal + Geo-Regulatory)
+        # Run comprehensive analysis (Legal + Geo-Regulatory) with tracking
         result = multimodal_crew.analyze_comprehensive_compliance(feature_data)
+        
+        # Complete tracking
+        complete_analysis_tracking(session_id)
         
         return {
             "analysis_type": "comprehensive_geo_compliance",
             "feature_analyzed": feature.project_name,
             "result": result,
             "regulatory_inquiry_ready": result.get("audit_trail_ready", False),
-            "timestamp": datetime.utcnow().isoformat()
+            "timestamp": datetime.utcnow().isoformat(),
+            "session_id": session_id  # Return session ID for frontend tracking
         }
         
     except Exception as e:
+        if session_id:
+            complete_analysis_tracking(session_id)
         raise HTTPException(status_code=500, detail=f"Comprehensive compliance analysis failed: {str(e)}")
 
 
@@ -486,6 +500,25 @@ async def geo_regulatory_mapping(feature: ProjectAnalysis):
         
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Geo-regulatory mapping failed: {str(e)}")
+
+
+@app.get("/api/progress-stream/{session_id}")
+async def stream_analysis_progress(session_id: str):
+    """Stream real-time analysis progress via Server-Sent Events"""
+    
+    async def generate_stream():
+        async for data in progress_tracker.stream_progress(session_id):
+            yield data
+    
+    return StreamingResponse(
+        generate_stream(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "Access-Control-Allow-Origin": "*",
+        }
+    )
 
 
 @app.post("/api/audit-trail-generation")
@@ -521,6 +554,119 @@ async def generate_audit_trail(feature: ProjectAnalysis):
         
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Audit trail generation failed: {str(e)}")
+
+
+@app.post("/api/bulk-csv-analysis")
+async def bulk_csv_analysis(background_tasks: BackgroundTasks, file: UploadFile = File(...)):
+    """Bulk analysis from CSV file upload"""
+    try:
+        # Validate file type
+        if not file.filename.endswith('.csv'):
+            raise HTTPException(status_code=400, detail="Only CSV files are allowed")
+        
+        # Read CSV content
+        content = await file.read()
+        csv_string = content.decode('utf-8')
+        csv_reader = csv.DictReader(io.StringIO(csv_string))
+        
+        # Convert CSV rows to analysis tasks
+        tasks = []
+        for row in csv_reader:
+            # Map CSV columns to our ProjectAnalysis structure
+            task = {
+                "project_name": row.get('Summary', ''),
+                "summary": f"{row.get('Issue Type', '')} - {row.get('Summary', '')}",
+                "project_description": f"Issue: {row.get('Issue key', '')} - {row.get('Summary', '')}. Priority: {row.get('Priority', '')}. Status: {row.get('Status', '')}",
+                "project_type": row.get('Issue Type', ''),
+                "priority": row.get('Priority', ''),
+                "due_date": row.get('Due date', ''),
+            }
+            
+            # Only include tasks with meaningful content
+            if task["project_name"]:
+                tasks.append(task)
+        
+        if not tasks:
+            raise HTTPException(status_code=400, detail="No valid tasks found in CSV")
+        
+        # Generate task ID for bulk operation
+        task_id = generate_task_id()
+        
+        # Initialize bulk task status
+        task_results[task_id] = {
+            "task_id": task_id,
+            "status": "pending",
+            "created_at": datetime.utcnow(),
+            "task_type": "bulk_csv_analysis",
+            "total_items": len(tasks),
+            "completed_items": 0,
+            "results": []
+        }
+        
+        # Start background bulk analysis
+        background_tasks.add_task(
+            run_bulk_csv_analysis_task,
+            task_id=task_id,
+            tasks=tasks
+        )
+        
+        return {
+            "task_id": task_id,
+            "status": "pending",
+            "message": f"Bulk CSV analysis started for {len(tasks)} items",
+            "total_items": len(tasks)
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"CSV bulk analysis failed: {str(e)}")
+
+
+async def run_bulk_csv_analysis_task(task_id: str, tasks: List[Dict]):
+    """Background task for running bulk CSV analysis"""
+    try:
+        task_results[task_id]["status"] = "running"
+        results = []
+        
+        for i, task in enumerate(tasks):
+            try:
+                # Run comprehensive analysis on each task
+                result = multimodal_crew.analyze_comprehensive_compliance(task)
+                
+                results.append({
+                    "feature_name": task["project_name"],
+                    "analysis_result": result,
+                    "timestamp": datetime.utcnow().isoformat(),
+                    "success": True
+                })
+                
+                # Update progress
+                task_results[task_id]["completed_items"] = i + 1
+                
+            except Exception as e:
+                results.append({
+                    "feature_name": task["project_name"],
+                    "error": str(e),
+                    "timestamp": datetime.utcnow().isoformat(),
+                    "success": False
+                })
+        
+        # Mark as completed
+        task_results[task_id].update({
+            "status": "completed",
+            "completed_at": datetime.utcnow(),
+            "results": results,
+            "success_count": len([r for r in results if r["success"]]),
+            "failure_count": len([r for r in results if not r["success"]])
+        })
+        
+    except Exception as e:
+        task_results[task_id].update({
+            "status": "failed",
+            "completed_at": datetime.utcnow(),
+            "error": str(e)
+        })
 
 
 if __name__ == "__main__":
