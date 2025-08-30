@@ -20,6 +20,7 @@ from pydantic import BaseModel, Field
 from dotenv import load_dotenv
 
 from src.agents.multimodal_crew import MultimodalCrew, ChatAgent
+from src.agents.enhanced_multimodal_crew import EnhancedMultimodalCrew
 from src.utils.file_handler import FileHandler
 from src.utils.agent_progress_tracker import progress_tracker, start_analysis_tracking, complete_analysis_tracking
 
@@ -46,6 +47,7 @@ app.add_middleware(
 # Global instances
 file_handler = FileHandler()
 multimodal_crew = MultimodalCrew()
+enhanced_multimodal_crew = None  # Will be initialized per request
 chat_agent = ChatAgent()
 
 # In-memory storage for task results and session context
@@ -155,8 +157,36 @@ async def health_check():
     return {
         "status": "healthy",
         "service": "multimodal-backend",
+        "enhanced_features": ["api_validation", "source_citations"],
         "timestamp": datetime.utcnow().isoformat()
     }
+
+@app.post("/api/test-validation")
+async def test_validation_system(feature: ProjectAnalysis):
+    """Test endpoint to verify the validation system works"""
+    try:
+        # Quick test of the enhanced crew
+        enhanced_crew = EnhancedMultimodalCrew(session_id="test_validation")
+        feature_data = feature.model_dump()
+        
+        # Run just the validation part
+        result = await enhanced_crew.analyze_comprehensive_compliance_with_validation(feature_data)
+        
+        return {
+            "test_status": "success",
+            "has_validation_data": bool(result.get("validation_summary")),
+            "api_calls_made": len(result.get("validation_summary", {}).get("api_details", [])),
+            "sources_found": len(result.get("validation_summary", {}).get("sources_consulted", [])),
+            "validation_summary": result.get("validation_summary", {}),
+            "timestamp": datetime.utcnow().isoformat()
+        }
+        
+    except Exception as e:
+        return {
+            "test_status": "failed",
+            "error": str(e),
+            "timestamp": datetime.utcnow().isoformat()
+        }
 
 
 @app.post("/api/upload", response_model=UploadResponse)
@@ -451,8 +481,9 @@ async def quick_legal_check(
 # Comprehensive Geo-Compliance Analysis Endpoints
 @app.post("/api/comprehensive-compliance-analysis")
 async def comprehensive_compliance_analysis(feature: ProjectAnalysis):
-    """Comprehensive geo-regulatory compliance analysis with real-time tracking"""
+    """Comprehensive geo-regulatory compliance analysis with validation tracking"""
     session_id = None
+    enhanced_crew = None
     try:
         # Start progress tracking
         session_id = start_analysis_tracking()
@@ -461,25 +492,51 @@ async def comprehensive_compliance_analysis(feature: ProjectAnalysis):
         feature_data = feature.model_dump()
         feature_data['_session_id'] = session_id  # Pass session ID to crew
         
-        # Run comprehensive analysis (Legal + Geo-Regulatory) with tracking
-        result = multimodal_crew.analyze_comprehensive_compliance(feature_data)
+        # Initialize enhanced crew with validation tracking
+        enhanced_crew = EnhancedMultimodalCrew(session_id=session_id)
+        
+        # Run enhanced analysis with API validation and source citation
+        result = await enhanced_crew.analyze_comprehensive_compliance_with_validation(feature_data)
         
         # Complete tracking
         complete_analysis_tracking(session_id)
         
         return {
-            "analysis_type": "comprehensive_geo_compliance",
+            "analysis_type": "enhanced_compliance_with_validation",
             "feature_analyzed": feature.project_name,
             "result": result,
             "regulatory_inquiry_ready": result.get("audit_trail_ready", False),
             "timestamp": datetime.utcnow().isoformat(),
-            "session_id": session_id  # Return session ID for frontend tracking
+            "session_id": session_id,
+            "has_validation_data": True,
+            "has_source_citations": True
         }
         
     except Exception as e:
         if session_id:
             complete_analysis_tracking(session_id)
-        raise HTTPException(status_code=500, detail=f"Comprehensive compliance analysis failed: {str(e)}")
+        # Fallback to original analysis if enhanced fails
+        try:
+            print(f"⚠️  Enhanced analysis failed, falling back to original: {e}")
+            result = multimodal_crew.analyze_comprehensive_compliance(feature_data)
+            return {
+                "analysis_type": "fallback_compliance",
+                "feature_analyzed": feature.project_name,
+                "result": result,
+                "regulatory_inquiry_ready": result.get("audit_trail_ready", False),
+                "timestamp": datetime.utcnow().isoformat(),
+                "session_id": session_id,
+                "fallback_reason": str(e)
+            }
+        except Exception as fallback_error:
+            raise HTTPException(status_code=500, detail=f"Both enhanced and fallback analysis failed: {str(fallback_error)}")
+    finally:
+        # Clean up enhanced crew resources
+        if enhanced_crew:
+            try:
+                await enhanced_crew.validation_aggregator.close()
+            except:
+                pass
 
 
 @app.post("/api/geo-regulatory-mapping") 

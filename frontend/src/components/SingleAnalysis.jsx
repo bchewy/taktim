@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from "react";
 import AgentVisualization from './AgentVisualization';
 import ResultsReady from './ResultsReady';
+import SourceCitationPanel from './SourceCitationPanel';
 import { ChevronDown, ChevronUp } from 'lucide-react';
 
 const SingleAnalysis = () => {
@@ -360,6 +361,7 @@ const SingleAnalysis = () => {
                             isActive={isAnalyzing} 
                             stage={currentStage}
                             analysisType="single"
+                            validationData={result?.result?.validation_summary}
                         />
                     )}
 
@@ -472,6 +474,29 @@ const SingleAnalysis = () => {
                                     )}
                                 </div>
                             </div>
+
+                            {/* Source Citations & Data Validation - Prominent Section */}
+                            {result && !result.error && result.result?.validation_summary && (
+                                <div className="p-6 border-2 border-green-200 rounded-lg bg-gradient-to-br from-green-50 to-blue-50">
+                                    <div className="mb-4">
+                                        <div className="flex items-center space-x-2 mb-2">
+                                            <svg className="w-6 h-6 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+                                            </svg>
+                                            <h3 className="text-xl font-bold text-green-900">Data Validation & Source Citations</h3>
+                                        </div>
+                                        <p className="text-sm text-green-700 bg-white/50 p-3 rounded-md border border-green-200">
+                                            <strong>📊 Benchmarking Results:</strong> This section shows the reliability of legal data sources used in your analysis. 
+                                            It includes API response success rates, source publication dates, and data freshness indicators to help you 
+                                            assess the quality and currency of the compliance recommendations above.
+                                        </p>
+                                    </div>
+                                    <SourceCitationPanel 
+                                        validationData={result.result.validation_summary}
+                                        analysisResult={result.result}
+                                    />
+                                </div>
+                            )}
 
                             {/* Legal Research Analysis - Detailed Section */}
                             <div className="border border-yellow-200 rounded-lg bg-yellow-50">

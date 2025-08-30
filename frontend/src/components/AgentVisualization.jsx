@@ -3,12 +3,13 @@ import { Bot, Search, Globe, FileText, Zap, CheckCircle, AlertTriangle, ArrowRig
 import AgentPersonalityModal from './AgentPersonalityModal'
 import AgentStatusBar from './AgentStatusBar'
 
-const AgentVisualization = ({ isActive, stage, analysisType = 'single' }) => {
+const AgentVisualization = ({ isActive, stage, analysisType = 'single', validationData = null }) => {
   const [activeAgent, setActiveAgent] = useState(null)
   const [connections, setConnections] = useState([])
   const [messages, setMessages] = useState([])
   const [selectedAgent, setSelectedAgent] = useState(null)
   const [showPersonality, setShowPersonality] = useState(false)
+  const [apiStatus, setApiStatus] = useState({})
 
   // Define our agents based on your multimodal backend
   const agents = {
@@ -68,11 +69,12 @@ const AgentVisualization = ({ isActive, stage, analysisType = 'single' }) => {
     'finalizing': ['multimodal_crew', 'audit_trail'] // Return comprehensive result
   }
 
-  // Agent interactions and messages - Based on actual backend operations
+  // Enhanced agent messages with API validation status
   const agentMessages = {
     legal_researcher: [
       "🔍 Starting legal compliance analysis...",
-      "📋 Analyzing project characteristics...", 
+      "📡 Calling GovInfo API...",
+      "📡 Accessing Congress.gov...", 
       "⚖️ Assessing regulatory concerns...",
       "📊 Generating risk level assessment...",
       "✅ Legal analysis completed!"
@@ -100,6 +102,41 @@ const AgentVisualization = ({ isActive, stage, analysisType = 'single' }) => {
     ]
   }
 
+  // API status tracking
+  const getAPIStatusMessage = (apiName, status) => {
+    const icons = {
+      calling: '⏳',
+      success: '✅', 
+      failed: '❌',
+      timeout: '⏱️'
+    }
+    
+    const messages = {
+      calling: `${icons.calling} Calling ${apiName}...`,
+      success: `${icons.success} ${apiName}: Retrieved successfully`,
+      failed: `${icons.failed} ${apiName}: Connection failed`,
+      timeout: `${icons.timeout} ${apiName}: Request timed out`
+    }
+    
+    return messages[status] || `📡 ${apiName}: ${status}`
+  }
+
+  // Update API status when validation data changes
+  useEffect(() => {
+    if (validationData && validationData.api_calls_summary) {
+      const newStatus = {}
+      validationData.api_details?.forEach(call => {
+        newStatus[call.api_name] = {
+          status: call.status,
+          result_count: call.result_count,
+          response_time: call.response_time_ms,
+          error: call.error_message
+        }
+      })
+      setApiStatus(newStatus)
+    }
+  }, [validationData])
+
   useEffect(() => {
     if (!isActive) return
 
@@ -117,19 +154,41 @@ const AgentVisualization = ({ isActive, stage, analysisType = 'single' }) => {
       }
       setConnections(newConnections)
 
-      // Add agent message
+      // Add agent message with API status integration
       const agent = activeAgents[0]
-      const agentMsgs = agentMessages[agent] || []
-      const randomMsg = agentMsgs[Math.floor(Math.random() * agentMsgs.length)]
       
-      setMessages(prev => [...prev.slice(-2), {
-        id: `${Date.now()}-${Math.random()}`,
-        agent: agent,
-        message: randomMsg,
-        timestamp: new Date()
-      }])
+      // Check if this is a legal research stage and we have API status
+      if (agent === 'legal_researcher' && Object.keys(apiStatus).length > 0) {
+        // Show API-specific status messages
+        Object.entries(apiStatus).forEach(([apiName, status]) => {
+          const statusMessage = getAPIStatusMessage(apiName, status.status)
+          const detailMessage = status.status === 'success' && status.result_count !== undefined
+            ? `${statusMessage} (${status.result_count} results in ${status.response_time?.toFixed(0)}ms)`
+            : statusMessage
+
+          setMessages(prev => [...prev.slice(-3), {
+            id: `${Date.now()}-${apiName}-${Math.random()}`,
+            agent: agent,
+            message: detailMessage,
+            timestamp: new Date(),
+            apiCall: true,
+            apiStatus: status.status
+          }])
+        })
+      } else {
+        // Default message behavior
+        const agentMsgs = agentMessages[agent] || []
+        const randomMsg = agentMsgs[Math.floor(Math.random() * agentMsgs.length)]
+        
+        setMessages(prev => [...prev.slice(-2), {
+          id: `${Date.now()}-${Math.random()}`,
+          agent: agent,
+          message: randomMsg,
+          timestamp: new Date()
+        }])
+      }
     }
-  }, [stage, isActive])
+  }, [stage, isActive, apiStatus])
 
   const getAgentColorClasses = (color) => {
     const colorMap = {
@@ -280,8 +339,23 @@ const AgentVisualization = ({ isActive, stage, analysisType = 'single' }) => {
                         <span className="text-xs text-gray-500">
                           {msg.timestamp.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
                         </span>
+                        {msg.apiCall && (
+                          <span className={`text-xs px-1.5 py-0.5 rounded-full text-white font-medium ${
+                            msg.apiStatus === 'success' ? 'bg-green-500' : 
+                            msg.apiStatus === 'failed' ? 'bg-red-500' : 
+                            'bg-yellow-500'
+                          }`}>
+                            API
+                          </span>
+                        )}
                       </div>
-                      <p className="text-xs text-gray-600 mt-1">{msg.message}</p>
+                      <p className={`text-xs mt-1 ${
+                        msg.apiCall && msg.apiStatus === 'success' ? 'text-green-700' :
+                        msg.apiCall && msg.apiStatus === 'failed' ? 'text-red-700' :
+                        'text-gray-600'
+                      }`}>
+                        {msg.message}
+                      </p>
                     </div>
                   </div>
                 )
